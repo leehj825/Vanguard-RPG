@@ -10,7 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
   flame: ^1.16.0
-  flame_svg: ^1.16.0
+  flame_svg: ^1.11.18
 
 dev_dependencies:
   flutter_test:
