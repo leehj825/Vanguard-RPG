@@ -371,7 +371,6 @@ class DamageText extends TextComponent {
     add(
       OpacityEffect.fadeOut(
         LinearEffectController(1.0),
-        targetId: 0, // Default
       ),
     );
   }
