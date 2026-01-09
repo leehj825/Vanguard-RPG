@@ -179,7 +179,8 @@ class Player extends RectangleComponent with HasGameRef<VanguardGame> {
     }
 
     // Iterate through all children in the world to find Enemies.
-    for (final child in gameRef.world.children) {
+    // Use toList() to avoid concurrent modification when enemies are removed or added.
+    for (final child in gameRef.world.children.toList()) {
       if (child is Enemy) {
         final distance = position.distanceTo(child.position);
         if (distance < weaponRange) {
@@ -221,7 +222,7 @@ class Player extends RectangleComponent with HasGameRef<VanguardGame> {
     skillEffect.angle += dt * 10; // Fast rotation
 
     // Check for damage
-    for (final child in gameRef.world.children) {
+    for (final child in gameRef.world.children.toList()) {
       if (child is Enemy) {
         final distance = position.distanceTo(child.position);
         // Collision check for skill (Radius + Enemy size approx)
