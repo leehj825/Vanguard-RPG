@@ -1,3 +1,4 @@
+import 'package:flame/collisions.dart';
 import 'package:flame/components.dart';
 import 'package:flame/events.dart';
 import 'package:flame/game.dart';
@@ -95,6 +96,9 @@ class VanguardGame extends FlameGame with HasCollisionDetection, TapCallbacks {
 
     // 2. Inventory UI (Top Center)
     inventoryDisplay = InventoryDisplay();
+    // Assuming screen width ~800, center is ~400. Inventory is 350 wide.
+    // Position relative to viewport (0,0 is top left)
+    inventoryDisplay.position = Vector2(225, 20); // Approximation
 
     // 3. Stats UI (Top Left)
     distanceText = TextComponent(
@@ -111,19 +115,19 @@ class VanguardGame extends FlameGame with HasCollisionDetection, TapCallbacks {
 
     // --- WORLD ---
     player = Player(joystick, floorBounds: Vector2(200, 600));
+    world.add(player);
 
-    add(player);
-    add(joystick);
-    add(attackButton);
-    add(skillButton);
-    add(autoButton);
-    add(inventoryDisplay);
-    add(distanceText);
-    add(xpLevelText);
-    // Note: PlayerHealthBar and XpBarComponent logic can be simple rectangles added to HUD or Player.
-    // Given the Player has a health bar on themselves (no, Enemy has it), we should add a HUD health bar.
-    add(PlayerHealthBar(player: player));
-    add(XpBarComponent(player: player));
+    // --- HUD (Viewport) ---
+    // Add HUD elements to camera.viewport so they stay static relative to screen
+    camera.viewport.add(joystick);
+    camera.viewport.add(attackButton);
+    camera.viewport.add(skillButton);
+    camera.viewport.add(autoButton);
+    camera.viewport.add(inventoryDisplay);
+    camera.viewport.add(distanceText);
+    camera.viewport.add(xpLevelText);
+    camera.viewport.add(PlayerHealthBar(player: player));
+    camera.viewport.add(XpBarComponent(player: player));
 
     // Initial Spawns
     spawnInitialObjects();
@@ -131,7 +135,7 @@ class VanguardGame extends FlameGame with HasCollisionDetection, TapCallbacks {
 
   void spawnInitialObjects() {
     for(int i=0; i<5; i++) {
-      add(Rock(position: Vector2(i * 150 + 300, 300 + _rnd.nextDouble() * 200)));
+      world.add(Rock(position: Vector2(i * 150 + 300, 300 + _rnd.nextDouble() * 200)));
     }
   }
 
@@ -151,19 +155,14 @@ class VanguardGame extends FlameGame with HasCollisionDetection, TapCallbacks {
     super.update(dt);
     if (isGameOver) return;
 
-    // Camera & HUD Sync
+    // Camera Sync
     double targetX = player.position.x - 100;
     if (targetX < 0) targetX = 0;
     camera.viewfinder.position = Vector2(targetX, 0);
 
-    // Simple HUD Movement (Lock to screen)
-    Vector2 cam = camera.viewfinder.position;
-    joystick.position = cam + Vector2(80, size.y - 80);
-    inventoryDisplay.position = cam + Vector2(size.x / 2 - 125, 20); // Center Top
-    distanceText.position = cam + Vector2(20, 20);
-    xpLevelText.position = cam + Vector2(20, 45);
+    // NOTE: HUD elements are now in camera.viewport, so they do NOT need manual position updates relative to camera.
 
-    // Update Text
+    // Update Text Content
     distanceText.text = 'Distance: ${(player.position.x / 10).toInt()}m';
     xpLevelText.text = 'Lvl ${player.level}';
 
@@ -175,27 +174,17 @@ class VanguardGame extends FlameGame with HasCollisionDetection, TapCallbacks {
       double spawnY = 200 + _rnd.nextDouble() * (size.y - 250);
 
       if (_rnd.nextDouble() < 0.6) {
-        add(Enemy(position: Vector2(spawnX, spawnY), hpScale: 1.0 + (player.level * 0.1)));
+        world.add(Enemy(position: Vector2(spawnX, spawnY), hpScale: 1.0 + (player.level * 0.1)));
       } else {
-        add(Rock(position: Vector2(spawnX, spawnY)));
+        world.add(Rock(position: Vector2(spawnX, spawnY)));
       }
     }
 
     // Cleanup
     // Iterate over a copy to avoid ConcurrentModificationError
-    for (final child in children.toList()) {
-       if (child is PositionComponent && child != player && child != joystick) {
-         // Only remove if it's part of the world (not HUD)
-         // But here HUD elements are also PositionComponents added to game.
-         // HUD elements move with camera, so their position relative to camera is fixed,
-         // but their absolute position updates.
-         // However, in this implementation:
-         // joystick.position = cam + ...
-         // So joystick moves forward.
-         // We need to differentiate world objects (Enemy, Rock, LootBox) from HUD.
-         if (child is Enemy || child is Rock || child is LootBox) {
-            if (child.position.x < player.position.x - size.x) child.removeFromParent();
-         }
+    for (final child in world.children.toList()) {
+       if (child is Enemy || child is Rock || child is LootBox) {
+          if ((child as PositionComponent).position.x < player.position.x - size.x) child.removeFromParent();
        }
     }
   }
@@ -345,11 +334,11 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
   void collectLoot(WeaponType newWeapon) {
     if (!inventory.contains(newWeapon)) {
       inventory.add(newWeapon);
-      gameRef.add(DamageText("Found ${newWeapon.name}!", position: position.clone()..y -= 80, color: const Color(0xFFFFD700)));
+      gameRef.world.add(DamageText("Found ${newWeapon.name}!", position: position.clone()..y -= 80, color: const Color(0xFFFFD700)));
       // Update UI
       gameRef.inventoryDisplay.updateInventoryVisuals();
     } else {
-      gameRef.add(DamageText("Duplicate Discarded", position: position.clone()..y -= 80, color: Colors.grey));
+      gameRef.world.add(DamageText("Duplicate Discarded", position: position.clone()..y -= 80, color: Colors.grey));
     }
   }
 
@@ -387,7 +376,7 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
       targetXp *= 1.5;
       maxHp += 20;
       currentHp = maxHp;
-      gameRef.add(
+      gameRef.world.add(
         LevelUpText(
           position: position.clone()..y -= 80,
         )
@@ -428,7 +417,7 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
     // Loot Check
     // Use safe iteration if modifying parent, but here we call pickup() which modifies parent (LootBox).
     // So we should iterate over copy of children.
-    for (final child in gameRef.children.toList()) {
+    for (final child in gameRef.world.children.toList()) {
       if (child is LootBox && child.toAbsoluteRect().overlaps(bodyVisual.toAbsoluteRect())) {
         child.pickup();
       }
@@ -443,7 +432,7 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
 
         // Hitbox check during active swing part
         if (progress > 0.2 && progress < 0.8) {
-           for (final child in gameRef.children.toList()) {
+           for (final child in gameRef.world.children.toList()) {
             if (child is Enemy) {
               if (stickWeapon.toAbsoluteRect().overlaps(child.bodyVisual.toAbsoluteRect())) {
                  child.takeDamage(damage * dt * 5);
@@ -457,7 +446,7 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
         }
       } else if (autoAttackEnabled) {
         // Auto Trigger
-        for (final child in gameRef.children) {
+        for (final child in gameRef.world.children) {
           if (child is Enemy && position.distanceTo(child.position) < range) {
             startAttack();
             break;
@@ -476,7 +465,7 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
     stickWeapon.opacity = 0;
     swirlEffect.opacity = 1;
 
-    for (final child in gameRef.children.toList()) {
+    for (final child in gameRef.world.children.toList()) {
       if (child is Enemy && position.distanceTo(child.position) <= 200) {
            child.takeDamage(100);
       }
@@ -493,15 +482,15 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
     _damageCooldown = 0.5;
     bodyVisual.paint = BasicPalette.red.paint();
     Future.delayed(const Duration(milliseconds: 200), () => bodyVisual.paint = BasicPalette.green.paint());
-    gameRef.add(DamageText("-${amount.toInt()}", position: position.clone()..y -= 50, color: Colors.red));
+    gameRef.world.add(DamageText("-${amount.toInt()}", position: position.clone()..y -= 50, color: Colors.red));
 
     if (currentHp <= 0) {
       gameRef.isGameOver = true;
-      gameRef.add(
+      gameRef.camera.viewport.add(
         TextComponent(
           text: "GAME OVER",
           textRenderer: TextPaint(style: const TextStyle(fontSize: 48, color: Colors.red, fontWeight: FontWeight.bold)),
-          position: gameRef.camera.viewfinder.position + Vector2(gameRef.size.x/2, gameRef.size.y/2),
+          position: gameRef.size / 2, // Center of viewport
           anchor: Anchor.center,
         )
       );
@@ -576,11 +565,11 @@ class Enemy extends PositionComponent with HasGameRef<VanguardGame> {
     _damageCooldown = 0.2;
     bodyVisual.paint = BasicPalette.white.paint();
     Future.delayed(const Duration(milliseconds: 50), () => bodyVisual.paint = BasicPalette.purple.paint());
-    gameRef.add(DamageText("-${amount.toInt()}", position: position.clone()..y -= 60));
+    gameRef.world.add(DamageText("-${amount.toInt()}", position: position.clone()..y -= 60));
 
     if (currentHp <= 0) {
       gameRef.player.gainXp(35);
-      if (Random().nextDouble() < 0.25) gameRef.add(LootBox(position: position.clone()));
+      if (Random().nextDouble() < 0.25) gameRef.world.add(LootBox(position: position.clone()));
       removeFromParent();
     }
   }
@@ -662,7 +651,7 @@ class PlayerHealthBar extends PositionComponent {
     // Keep fixed on screen relative to camera is handled by parenting or manual update.
     // Here we act as a HUD element added to game, so we need to move with camera.
     // For simplicity, let's attach to the Stats area.
-    position = player.gameRef.camera.viewfinder.position + Vector2(20, 70);
+    position = Vector2(20, 70);
   }
 
   @override
@@ -692,7 +681,7 @@ class XpBarComponent extends PositionComponent {
   @override
   void update(double dt) {
     super.update(dt);
-    position = player.gameRef.camera.viewfinder.position + Vector2(20, 90);
+    position = Vector2(20, 90);
   }
 
   @override
