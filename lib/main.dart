@@ -17,6 +17,8 @@ class VanguardGame extends FlameGame with HasCollisionDetection {
   late final JoystickComponent joystick;
   late final HudButtonComponent skillButton;
   late final TextComponent distanceText;
+  late final TextComponent xpLevelText;
+  late final XpBarComponent xpBar;
 
   // Spawning State
   final Random _random = Random();
@@ -31,7 +33,7 @@ class VanguardGame extends FlameGame with HasCollisionDetection {
     player = Player(position: Vector2(0, 0));
     world.add(player);
 
-    // 3. Setup HUD (Joystick, Skill Button, Distance Tracker)
+    // 3. Setup HUD (Joystick, Skill Button, Distance Tracker, XP)
     // Left Joystick
     final knobPaint = BasicPalette.blue.withAlpha(200).paint();
     final backgroundPaint = BasicPalette.blue.withAlpha(100).paint();
@@ -54,10 +56,10 @@ class VanguardGame extends FlameGame with HasCollisionDetection {
       },
     );
 
-    // Distance Tracker Text
+    // Distance Tracker Text (Top Left)
     distanceText = TextComponent(
       text: 'Distance: 0m',
-      position: Vector2(20, 40), // Top-left margin
+      position: Vector2(20, 40),
       textRenderer: TextPaint(
         style: const TextStyle(
           color: Colors.white,
@@ -70,10 +72,31 @@ class VanguardGame extends FlameGame with HasCollisionDetection {
       ),
     );
 
+    // XP Level Text (Below Distance)
+    xpLevelText = TextComponent(
+      text: 'Lvl 1',
+      position: Vector2(20, 70),
+      textRenderer: TextPaint(
+        style: const TextStyle(
+          color: Colors.yellow,
+          fontSize: 20,
+          fontWeight: FontWeight.bold,
+          shadows: [
+            Shadow(offset: Offset(2, 2), color: Colors.black, blurRadius: 2),
+          ],
+        ),
+      ),
+    );
+
+    // XP Bar (Top Centerish)
+    xpBar = XpBarComponent(player: player);
+
     // Add HUD elements to the viewport so they stay static on screen
     camera.viewport.add(joystick);
     camera.viewport.add(skillButton);
     camera.viewport.add(distanceText);
+    camera.viewport.add(xpLevelText);
+    camera.viewport.add(xpBar);
 
     // 5. Setup Camera
     // Set initial position
@@ -86,13 +109,11 @@ class VanguardGame extends FlameGame with HasCollisionDetection {
 
     // 1. Camera Logic
     // Follow Player X, Lock Y at 0.
-    // Clamp so camera doesn't show negative world space (left of start) if desired,
-    // but typically strictly following player X is fine for endless scroller.
-    // Ensure player doesn't move left of 0 is handled in Player class.
     camera.viewfinder.position = Vector2(player.position.x, 0);
 
     // 2. Update HUD
     distanceText.text = 'Distance: ${(player.position.x / 10).toInt()}m';
+    xpLevelText.text = 'Lvl ${player.level}';
 
     // 3. Endless Spawning System
     _spawnTimer -= dt;
@@ -119,20 +140,19 @@ class VanguardGame extends FlameGame with HasCollisionDetection {
   void _spawnEntity() {
     // Determine spawn position
     // Spawn off-screen to the right.
-    // Camera shows window around player.position.x.
-    // Viewport size is not always available in onLoad but is in update.
     final viewportWidth = camera.viewport.size.x;
     final spawnX = player.position.x + viewportWidth / 2 + 100;
 
     // Random Y between "floor bounds".
-    // Let's assume a playable area of -150 to 150 based on previous entity positions.
     final spawnY = -150 + _random.nextDouble() * 300;
 
     final spawnPos = Vector2(spawnX, spawnY);
 
     if (_random.nextDouble() < 0.7) {
       // 70% Chance Enemy
-      world.add(Enemy(position: spawnPos));
+      // Calculate Difficulty Scaling
+      double difficultyScale = 1.0 + (player.level * 0.2);
+      world.add(Enemy(position: spawnPos, hpScale: difficultyScale));
     } else {
       // 30% Chance Rock
       world.add(Rock(position: spawnPos));
@@ -144,6 +164,12 @@ class Player extends RectangleComponent with HasGameRef<VanguardGame> {
   static const double speed = 200;
   static const double weaponRange = 100;
   static const double skillRange = 150;
+
+  // Stats
+  int level = 1;
+  double currentXp = 0;
+  double targetXp = 100;
+  double stickDamage = 10;
 
   // Visuals
   final Paint _normalPaint = BasicPalette.white.paint();
@@ -194,6 +220,24 @@ class Player extends RectangleComponent with HasGameRef<VanguardGame> {
     );
     skillEffect.opacity = 0; // Hidden by default
     add(skillEffect);
+  }
+
+  void gainXp(double amount) {
+    currentXp += amount;
+    // Level Up Loop (in case massive XP gain)
+    while (currentXp >= targetXp) {
+      currentXp -= targetXp;
+      level++;
+      targetXp *= 1.5;
+      stickDamage += 10;
+
+      // Visual Feedback
+      gameRef.world.add(
+        LevelUpText(
+          position: position.clone()..y -= 80, // Above head
+        )
+      );
+    }
   }
 
   void triggerSkill() {
@@ -261,7 +305,7 @@ class Player extends RectangleComponent with HasGameRef<VanguardGame> {
 
           // Apply Damage if cooldown ready
           if (_damageCooldown <= 0) {
-             child.takeDamage(10);
+             child.takeDamage(stickDamage);
              dealtDamage = true;
           }
         }
@@ -325,13 +369,15 @@ class Enemy extends RectangleComponent with HasGameRef<VanguardGame> {
 
   double _damageTimer = 0;
 
-  Enemy({required Vector2 position})
+  Enemy({required Vector2 position, double hpScale = 1.0})
       : super(
           position: position,
           size: Vector2(50, 80),
           anchor: Anchor.bottomCenter,
         ) {
      paint = _normalPaint;
+     maxHp = 100 * hpScale;
+     hp = maxHp;
   }
 
   @override
@@ -359,6 +405,8 @@ class Enemy extends RectangleComponent with HasGameRef<VanguardGame> {
     // Check Death
     if (hp <= 0) {
       removeFromParent();
+      // Grant XP to player
+      gameRef.player.gainXp(35);
     }
   }
 
@@ -406,10 +454,7 @@ class HealthBarComponent extends PositionComponent with HasAncestor<Enemy> {
   final Paint _barForePaint = BasicPalette.green.paint();
 
   HealthBarComponent() : super(
-    position: Vector2(0, -10), // 10 pixels above head (relative to parent top-left if not scaled?)
-    // Note: Parent (Enemy) is 50x80. Anchor BottomCenter.
-    // Children positions are relative to the top-left of the parent's size box (0,0) to (50,80).
-    // So (0, -10) is 10px above the top edge.
+    position: Vector2(0, -10), // 10 pixels above head
     size: Vector2(50, 5),
   );
 
@@ -420,9 +465,43 @@ class HealthBarComponent extends PositionComponent with HasAncestor<Enemy> {
 
     // Foreground
     final enemy = ancestor;
-    final hpPercent = enemy.hp / enemy.maxHp;
+    // Safety check for div by zero if maxHp is somehow 0 (unlikely)
+    double hpPercent = 0;
+    if (enemy.maxHp > 0) {
+      hpPercent = enemy.hp / enemy.maxHp;
+    }
     canvas.drawRect(
       Rect.fromLTWH(0, 0, size.x * hpPercent, size.y),
+      _barForePaint
+    );
+  }
+}
+
+class XpBarComponent extends PositionComponent {
+  final Player player;
+  final Paint _barBackPaint = BasicPalette.gray.paint();
+  final Paint _barForePaint = BasicPalette.yellow.paint();
+
+  XpBarComponent({required this.player}) : super(
+    position: Vector2(20, 100), // Below Level Text
+    size: Vector2(200, 15),
+  );
+
+  @override
+  void render(Canvas canvas) {
+    // Background
+    canvas.drawRect(size.toRect(), _barBackPaint);
+
+    // Foreground
+    double xpPercent = 0;
+    if (player.targetXp > 0) {
+      xpPercent = player.currentXp / player.targetXp;
+    }
+    // Clamp
+    if (xpPercent > 1) xpPercent = 1;
+
+    canvas.drawRect(
+      Rect.fromLTWH(0, 0, size.x * xpPercent, size.y),
       _barForePaint
     );
   }
@@ -456,10 +535,44 @@ class DamageText extends TextComponent {
       ),
     );
 
-    // Fade Out Effect removed to prevent crashes/issues.
-    // Just remove after 1s.
+    // Remove after 1s.
     add(
       RemoveEffect(delay: 1.0),
+    );
+  }
+}
+
+class LevelUpText extends TextComponent {
+  LevelUpText({required Vector2 position})
+      : super(
+          text: "LEVEL UP!",
+          position: position,
+          textRenderer: TextPaint(
+            style: const TextStyle(
+              color: Colors.yellow,
+              fontSize: 32, // Larger
+              fontWeight: FontWeight.bold,
+              shadows: [
+                Shadow(offset: Offset(2, 2), color: Colors.black, blurRadius: 2),
+              ],
+            ),
+          ),
+          anchor: Anchor.center,
+        );
+
+  @override
+  Future<void> onLoad() async {
+    // Move Up Effect (Slower, higher)
+    add(
+      MoveEffect.by(
+        Vector2(0, -80),
+        LinearEffectController(2.0),
+      ),
+    );
+
+    // Remove after 2s.
+    add(
+      RemoveEffect(delay: 2.0),
     );
   }
 }
