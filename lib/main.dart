@@ -1,10 +1,11 @@
 import 'dart:math';
 
 import 'package:flame/components.dart';
+import 'package:flame/effects.dart'; // Added for DamageText effects
 import 'package:flame/game.dart';
 import 'package:flame/input.dart';
 import 'package:flame/palette.dart';
-import 'package:flame_svg/flame_svg.dart'; // Imported as requested, even if unused for now
+import 'package:flame_svg/flame_svg.dart'; // Imported as requested
 import 'package:flutter/material.dart';
 
 void main() {
@@ -87,8 +88,11 @@ class Player extends RectangleComponent with HasGameRef<VanguardGame> {
 
   // State
   double _attackTimer = 0;
+  double _damageCooldown = 0; // Timer for auto-attack damage
+
   double _skillTimer = 0;
   bool _isSkillActive = false;
+  final Set<Enemy> _skillHitTargets = {}; // Track enemies hit by current skill
 
   Player({required Vector2 position})
       : super(
@@ -129,6 +133,7 @@ class Player extends RectangleComponent with HasGameRef<VanguardGame> {
     _isSkillActive = true;
     _skillTimer = 1.0; // 1 second duration
     skillEffect.opacity = 1;
+    _skillHitTargets.clear(); // Reset hit targets for new skill activation
   }
 
   @override
@@ -166,32 +171,46 @@ class Player extends RectangleComponent with HasGameRef<VanguardGame> {
 
   void _checkAutoAttack(double dt) {
     bool enemyInRange = false;
+    bool dealtDamage = false;
 
-    // Check for enemies
+    // Countdown damage cooldown
+    if (_damageCooldown > 0) {
+      _damageCooldown -= dt;
+    }
+
+    // Iterate through all children in the world to find Enemies.
     for (final child in gameRef.world.children) {
       if (child is Enemy) {
         final distance = position.distanceTo(child.position);
         if (distance < weaponRange) {
           enemyInRange = true;
-          break;
+
+          // Apply Damage if cooldown ready
+          if (_damageCooldown <= 0) {
+             child.takeDamage(10);
+             dealtDamage = true;
+          }
         }
       }
     }
 
-    // Update state
+    // Reset cooldown if we dealt damage to anyone
+    if (dealtDamage) {
+      _damageCooldown = 0.5;
+    }
+
+    // Update Visual State
     if (enemyInRange) {
       paint = _attackPaint;
       weapon.opacity = 1;
 
       // Animate weapon: Sine wave swinging
-      _attackTimer += dt * 10; // Speed of swing
-      // Swing between -pi/4 (up) and 0 (front) roughly, or just wiggle
-      // Let's make it swing from -45 deg to +45 deg relative to front
+      _attackTimer += dt * 10;
       weapon.angle = sin(_attackTimer) * 0.5;
     } else {
       paint = _normalPaint;
       weapon.opacity = 0;
-      _attackTimer = 0; // Reset
+      _attackTimer = 0;
     }
   }
 
@@ -205,11 +224,12 @@ class Player extends RectangleComponent with HasGameRef<VanguardGame> {
     for (final child in gameRef.world.children) {
       if (child is Enemy) {
         final distance = position.distanceTo(child.position);
-        // Note: skillEffect radius is `skillRange`, so diameter is 2*skillRange.
-        // But `radius` in CircleComponent constructor is the radius.
-        // Distance check:
-        if (distance < skillRange + 25) { // +25 is rough radius of enemy
-             child.takeDamageEffect();
+        // Collision check for skill (Radius + Enemy size approx)
+        if (distance < skillRange + 25) {
+           if (!_skillHitTargets.contains(child)) {
+             child.takeDamage(50);
+             _skillHitTargets.add(child);
+           }
         }
       }
     }
@@ -221,9 +241,13 @@ class Player extends RectangleComponent with HasGameRef<VanguardGame> {
   }
 }
 
-class Enemy extends RectangleComponent {
+class Enemy extends RectangleComponent with HasGameRef<VanguardGame> {
   final Paint _normalPaint = BasicPalette.purple.paint();
   final Paint _damagePaint = BasicPalette.red.paint();
+
+  // Health
+  double maxHp = 100;
+  double hp = 100;
 
   double _damageTimer = 0;
 
@@ -236,9 +260,59 @@ class Enemy extends RectangleComponent {
      paint = _normalPaint;
   }
 
+  void takeDamage(double amount) {
+    hp -= amount;
+    if (hp < 0) hp = 0;
+
+    // Show Damage Text
+    // Spawn at top of enemy (approx height)
+    gameRef.world.add(
+      DamageText(
+        amount.toInt().toString(),
+        position - Vector2(0, size.y), // Position above head
+      )
+    );
+
+    // Visual Feedback
+    takeDamageEffect();
+
+    // Check Death
+    if (hp <= 0) {
+      removeFromParent();
+    }
+  }
+
   void takeDamageEffect() {
     paint = _damagePaint;
     _damageTimer = 0.5; // Red for 0.5 seconds
+  }
+
+  @override
+  void render(Canvas canvas) {
+    super.render(canvas); // Draw the enemy box
+
+    // Draw Health Bar
+    // Draw above the enemy. Local coordinates (0,0) is top-left of the box.
+    // Wait, RectangleComponent render uses the size.
+    // If we want to draw relative to the component, we use the local coordinates.
+    // The component size is 50x80.
+
+    const barWidth = 50.0;
+    const barHeight = 5.0;
+    const yOffset = -10.0; // 10 pixels above head
+
+    // Background (Red)
+    canvas.drawRect(
+      Rect.fromLTWH(0, yOffset, barWidth, barHeight),
+      BasicPalette.red.paint()
+    );
+
+    // Foreground (Green)
+    final hpPercent = hp / maxHp;
+    canvas.drawRect(
+      Rect.fromLTWH(0, yOffset, barWidth * hpPercent, barHeight),
+      BasicPalette.green.paint()
+    );
   }
 
   @override
@@ -255,5 +329,50 @@ class Enemy extends RectangleComponent {
         paint = _normalPaint;
       }
     }
+  }
+}
+
+class DamageText extends TextComponent {
+  DamageText(String text, Vector2 position)
+      : super(
+          text: text,
+          position: position,
+          textRenderer: TextPaint(
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+              shadows: [
+                Shadow(offset: Offset(2, 2), color: Colors.black, blurRadius: 2),
+              ],
+            ),
+          ),
+          anchor: Anchor.center,
+        );
+
+  @override
+  Future<void> onLoad() async {
+    // Move Up Effect
+    add(
+      MoveEffect.by(
+        Vector2(0, -50),
+        LinearEffectController(1.0),
+      ),
+    );
+
+    // Fade Out Effect (Optional if supported, otherwise just remove)
+    // Note: TextComponent opacity handling varies.
+    // We will rely on RemoveEffect to clean it up.
+    add(
+      RemoveEffect(delay: 1.0),
+    );
+
+    // Attempt opacity effect (Works if TextComponent supports HasPaint in this version or wraps paint correctly)
+    add(
+      OpacityEffect.fadeOut(
+        LinearEffectController(1.0),
+        targetId: 0, // Default
+      ),
+    );
   }
 }
