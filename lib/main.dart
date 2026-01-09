@@ -266,19 +266,23 @@ class VanguardGame extends FlameGame with HasCollisionDetection {
   void _updateAutoText() {
     if (player.autoAttackEnabled) {
       autoToggleText.text = "AUTO: ON";
-      (autoToggleText.textRenderer as TextPaint).style = const TextStyle(
+      autoToggleText.textRenderer = TextPaint(
+        style: const TextStyle(
           color: Colors.green,
           fontSize: 20,
           fontWeight: FontWeight.bold,
-          shadows: [Shadow(blurRadius: 2, color: Colors.black, offset: Offset(1,1))],
+          shadows: [Shadow(blurRadius: 2, color: Colors.black, offset: Offset(1, 1))],
+        ),
       );
     } else {
       autoToggleText.text = "AUTO: OFF";
-      (autoToggleText.textRenderer as TextPaint).style = const TextStyle(
+      autoToggleText.textRenderer = TextPaint(
+        style: const TextStyle(
           color: Colors.red,
           fontSize: 20,
           fontWeight: FontWeight.bold,
-          shadows: [Shadow(blurRadius: 2, color: Colors.black, offset: Offset(1,1))],
+          shadows: [Shadow(blurRadius: 2, color: Colors.black, offset: Offset(1, 1))],
+        ),
       );
     }
   }
@@ -763,7 +767,7 @@ class LootBox extends RectangleComponent {
     position: position,
     size: Vector2(30, 30),
     anchor: Anchor.center,
-    paint: BasicPalette.gold.paint(),
+    paint: Paint()..color = const Color(0xFFFFD700), // Gold
   );
 
   @override
