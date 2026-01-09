@@ -16,6 +16,11 @@ class VanguardGame extends FlameGame with HasCollisionDetection {
   late final Player player;
   late final JoystickComponent joystick;
   late final HudButtonComponent skillButton;
+  late final TextComponent distanceText;
+
+  // Spawning State
+  final Random _random = Random();
+  double _spawnTimer = 0;
 
   @override
   Future<void> onLoad() async {
@@ -26,12 +31,7 @@ class VanguardGame extends FlameGame with HasCollisionDetection {
     player = Player(position: Vector2(0, 0));
     world.add(player);
 
-    // 3. Add Enemies
-    world.add(Enemy(position: Vector2(200, 50)));
-    world.add(Enemy(position: Vector2(400, -50)));
-    world.add(Enemy(position: Vector2(600, 100)));
-
-    // 4. Setup HUD (Joystick and Skill Button)
+    // 3. Setup HUD (Joystick, Skill Button, Distance Tracker)
     // Left Joystick
     final knobPaint = BasicPalette.blue.withAlpha(200).paint();
     final backgroundPaint = BasicPalette.blue.withAlpha(100).paint();
@@ -54,9 +54,26 @@ class VanguardGame extends FlameGame with HasCollisionDetection {
       },
     );
 
+    // Distance Tracker Text
+    distanceText = TextComponent(
+      text: 'Distance: 0m',
+      position: Vector2(20, 40), // Top-left margin
+      textRenderer: TextPaint(
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 20,
+          fontWeight: FontWeight.bold,
+          shadows: [
+            Shadow(offset: Offset(2, 2), color: Colors.black, blurRadius: 2),
+          ],
+        ),
+      ),
+    );
+
     // Add HUD elements to the viewport so they stay static on screen
     camera.viewport.add(joystick);
     camera.viewport.add(skillButton);
+    camera.viewport.add(distanceText);
 
     // 5. Setup Camera
     // Set initial position
@@ -66,10 +83,60 @@ class VanguardGame extends FlameGame with HasCollisionDetection {
   @override
   void update(double dt) {
     super.update(dt);
-    // Camera Logic: Follow Player X, Lock Y (e.g., at 0)
-    // We update the camera's viewfinder position manually.
-    // This clamps the Y axis to 0 while following the player on X.
+
+    // 1. Camera Logic
+    // Follow Player X, Lock Y at 0.
+    // Clamp so camera doesn't show negative world space (left of start) if desired,
+    // but typically strictly following player X is fine for endless scroller.
+    // Ensure player doesn't move left of 0 is handled in Player class.
     camera.viewfinder.position = Vector2(player.position.x, 0);
+
+    // 2. Update HUD
+    distanceText.text = 'Distance: ${(player.position.x / 10).toInt()}m';
+
+    // 3. Endless Spawning System
+    _spawnTimer -= dt;
+    if (_spawnTimer <= 0) {
+      _spawnEntity();
+      // Reset timer to random interval between 1.5s and 2.0s
+      _spawnTimer = 1.5 + _random.nextDouble() * 0.5;
+    }
+
+    // 4. Garbage Collection (Cleanup)
+    // Remove entities that are far behind the player
+    // Iterate over a copy to safely remove
+    for (final child in world.children.toList()) {
+      // Check if it's an Enemy or Rock (spawned entities)
+      if (child is Enemy || child is Rock) {
+        // If > 1000 pixels behind player
+        if ((child as PositionComponent).position.x < player.position.x - 1000) {
+          child.removeFromParent();
+        }
+      }
+    }
+  }
+
+  void _spawnEntity() {
+    // Determine spawn position
+    // Spawn off-screen to the right.
+    // Camera shows window around player.position.x.
+    // Viewport size is not always available in onLoad but is in update.
+    final viewportWidth = camera.viewport.size.x;
+    final spawnX = player.position.x + viewportWidth / 2 + 100;
+
+    // Random Y between "floor bounds".
+    // Let's assume a playable area of -150 to 150 based on previous entity positions.
+    final spawnY = -150 + _random.nextDouble() * 300;
+
+    final spawnPos = Vector2(spawnX, spawnY);
+
+    if (_random.nextDouble() < 0.7) {
+      // 70% Chance Enemy
+      world.add(Enemy(position: spawnPos));
+    } else {
+      // 30% Chance Rock
+      world.add(Rock(position: spawnPos));
+    }
   }
 }
 
@@ -149,6 +216,11 @@ class Player extends RectangleComponent with HasGameRef<VanguardGame> {
 
       // Move Player
       position.add(movement);
+
+      // Boundary Check (Left Wall at 0)
+      if (position.x < 0) {
+        position.x = 0;
+      }
 
       // Facing Logic
       if (movement.x > 0 && scale.x < 0) {
@@ -309,6 +381,23 @@ class Enemy extends RectangleComponent with HasGameRef<VanguardGame> {
         paint = _normalPaint;
       }
     }
+  }
+}
+
+class Rock extends CircleComponent {
+  Rock({required Vector2 position})
+      : super(
+          radius: 30, // 60px diameter
+          position: position,
+          anchor: Anchor.center,
+          paint: BasicPalette.gray.paint(),
+        );
+
+  @override
+  void update(double dt) {
+    super.update(dt);
+    // Depth System
+    priority = position.y.toInt();
   }
 }
 
