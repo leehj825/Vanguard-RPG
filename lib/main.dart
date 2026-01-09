@@ -6,11 +6,61 @@ import 'package:flame/effects.dart';
 import 'package:flame/game.dart';
 import 'package:flame/input.dart';
 import 'package:flame/palette.dart';
-import 'package:flame_svg/flame_svg.dart'; // Imported as requested
+import 'package:flame_svg/flame_svg.dart';
 import 'package:flutter/material.dart';
 
 void main() {
-  runApp(GameWidget(game: VanguardGame()));
+  runApp(
+    GameWidget(
+      game: VanguardGame(),
+      overlayBuilderMap: {
+        'GameOver': (BuildContext context, VanguardGame game) {
+          return Center(
+            child: Container(
+              color: Colors.black.withOpacity(0.8),
+              padding: const EdgeInsets.all(30),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'GAME OVER',
+                    style: TextStyle(
+                      color: Colors.red,
+                      fontSize: 48,
+                      fontWeight: FontWeight.bold,
+                      shadows: [
+                        Shadow(
+                          blurRadius: 4,
+                          color: Colors.black,
+                          offset: Offset(2, 2),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
+                    ),
+                    onPressed: () {
+                      game.resetGame();
+                      game.overlays.remove('GameOver');
+                    },
+                    child: const Text(
+                      'Restart',
+                      style: TextStyle(fontSize: 24),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      },
+    ),
+  );
 }
 
 class VanguardGame extends FlameGame with HasCollisionDetection {
@@ -28,9 +78,6 @@ class VanguardGame extends FlameGame with HasCollisionDetection {
 
   @override
   Future<void> onLoad() async {
-    // 1. Setup World
-    // The default `world` is used. We will add components to it.
-
     // 2. Create the Player
     player = Player(position: Vector2(0, 0));
     world.add(player);
@@ -109,6 +156,21 @@ class VanguardGame extends FlameGame with HasCollisionDetection {
     camera.viewfinder.anchor = Anchor.center;
   }
 
+  void resetGame() {
+    player.reset();
+
+    // Remove all spawned entities
+    // Iterate over a copy to avoid concurrent modification during removal
+    for (final child in world.children.toList()) {
+      if (child is Enemy || child is Rock || child is DamageText || child is LevelUpText) {
+        child.removeFromParent();
+      }
+    }
+
+    _spawnTimer = 0;
+    resumeEngine();
+  }
+
   @override
   void update(double dt) {
     super.update(dt);
@@ -131,11 +193,8 @@ class VanguardGame extends FlameGame with HasCollisionDetection {
 
     // 4. Garbage Collection (Cleanup)
     // Remove entities that are far behind the player
-    // Iterate over a copy to safely remove
     for (final child in world.children.toList()) {
-      // Check if it's an Enemy or Rock (spawned entities)
       if (child is Enemy || child is Rock) {
-        // If > 1000 pixels behind player
         if ((child as PositionComponent).position.x < player.position.x - 1000) {
           child.removeFromParent();
         }
@@ -157,8 +216,14 @@ class VanguardGame extends FlameGame with HasCollisionDetection {
     if (_random.nextDouble() < 0.7) {
       // 70% Chance Enemy
       // Calculate Difficulty Scaling
-      double difficultyScale = 1.0 + (player.level * 0.2);
-      world.add(Enemy(position: spawnPos, hpScale: difficultyScale));
+      double difficultyScale = 1.0 + (player.level * 0.2); // Start at 1.0, +20% per level (simplified)
+      // Base HP 40 * (1 + level * 0.1) according to requirements.
+      // Requirement says: "Enemy Max HP: 40 (Scales with level)."
+      // Requirement says: "New enemies spawn with higher Max HP based on the Player's Level."
+      // Let's stick to the simpler formula logic or explicit if needed.
+      // Re-reading requirements: "Enemy Max HP: 40 (Scales with level)."
+      // I'll implement exactly that.
+      world.add(Enemy(position: spawnPos, levelScale: player.level));
     } else {
       // 30% Chance Rock
       world.add(Rock(position: spawnPos));
@@ -185,12 +250,13 @@ class Weapon extends RectangleComponent {
 class Player extends RectangleComponent with HasGameRef<VanguardGame> {
   static const double speed = 200;
   static const double skillRange = 150;
+  static final Vector2 playerSize = Vector2(35, 56); // 70% of 50x80
 
   // Stats
   int level = 1;
   double currentXp = 0;
   double targetXp = 100;
-  double stickDamage = 20; // Updated Start Damage
+  double stickDamage = 20;
 
   double maxHp = 100;
   double hp = 100;
@@ -201,13 +267,13 @@ class Player extends RectangleComponent with HasGameRef<VanguardGame> {
   final Paint _brownPaint = BasicPalette.brown.paint();
 
   // Child Components
-  late final Weapon stickWeapon; // Renamed as requested
+  late final Weapon stickWeapon;
   late final CircleComponent skillEffect;
 
   // State
   double _attackTimer = 0;
-  double _damageCooldown = 0; // Timer for dealing damage (hit rate)
-  double _hitCooldown = 0; // Invulnerability timer
+  double _damageCooldown = 0;
+  double _hitCooldown = 0;
 
   double _skillTimer = 0;
   bool _isSkillActive = false;
@@ -218,7 +284,7 @@ class Player extends RectangleComponent with HasGameRef<VanguardGame> {
   Player({required Vector2 position})
       : super(
           position: position,
-          size: Vector2(50, 80),
+          size: playerSize,
           anchor: Anchor.bottomCenter,
         );
 
@@ -226,15 +292,15 @@ class Player extends RectangleComponent with HasGameRef<VanguardGame> {
   Future<void> onLoad() async {
     paint = _normalPaint;
 
-    // Weapon (The Stick)
+    // Weapon (The Stick) - Size kept as requested (60x10)
     stickWeapon = Weapon(
       size: Vector2(60, 10),
       paint: _brownPaint,
       anchor: Anchor.centerLeft,
       position: Vector2(size.x / 2, size.y / 2),
-      angle: -pi / 4, // Initial angle up
+      angle: -pi / 4,
     );
-    stickWeapon.opacity = 0; // Hidden by default
+    stickWeapon.opacity = 0;
     add(stickWeapon);
 
     // Skill Effect
@@ -248,6 +314,23 @@ class Player extends RectangleComponent with HasGameRef<VanguardGame> {
     add(skillEffect);
   }
 
+  void reset() {
+    hp = 100;
+    maxHp = 100;
+    level = 1;
+    currentXp = 0;
+    targetXp = 100;
+    stickDamage = 20;
+    position = Vector2(0, 0);
+    scale.x = 1;
+    paint = _normalPaint;
+    _hitCooldown = 0;
+    _damageCooldown = 0;
+    stickWeapon.opacity = 0;
+    skillEffect.opacity = 0;
+    _isSkillActive = false;
+  }
+
   void gainXp(double amount) {
     currentXp += amount;
     while (currentXp >= targetXp) {
@@ -255,7 +338,7 @@ class Player extends RectangleComponent with HasGameRef<VanguardGame> {
       level++;
       targetXp *= 1.5;
       stickDamage += 10;
-      maxHp += 20;
+      maxHp += 20; // Increase max HP on level up
       hp = maxHp; // Heal on level up
       gameRef.world.add(
         LevelUpText(
@@ -274,19 +357,16 @@ class Player extends RectangleComponent with HasGameRef<VanguardGame> {
   }
 
   void takeDamage(double amount) {
-    if (_hitCooldown > 0) return; // Invulnerable
+    if (_hitCooldown > 0) return;
 
     hp -= amount;
-    _hitCooldown = 0.2; // 0.2s invulnerability
-
-    // Visual Feedback
+    _hitCooldown = 0.2;
     paint = _damagePaint;
 
     if (hp <= 0) {
       hp = 0;
-      // Restart or Reset logic could be here
-      // For now, infinite life hack for endless running as no death screen requested
-      hp = maxHp;
+      gameRef.pauseEngine();
+      gameRef.overlays.add('GameOver');
     }
   }
 
@@ -311,10 +391,10 @@ class Player extends RectangleComponent with HasGameRef<VanguardGame> {
     if (_damageCooldown > 0) _damageCooldown -= dt;
     if (_hitCooldown > 0) {
       _hitCooldown -= dt;
-      if (_hitCooldown <= 0) paint = _normalPaint; // Restore color
+      if (_hitCooldown <= 0) paint = _normalPaint;
     }
 
-    // Weapon Logic (Animation & Overlap Check)
+    // Weapon Logic
     _handleWeaponLogic(dt);
 
     // Skill Logic
@@ -324,7 +404,6 @@ class Player extends RectangleComponent with HasGameRef<VanguardGame> {
   }
 
   void _handleWeaponLogic(double dt) {
-    // 1. Detection for animation
     bool enemyInDetectionRange = false;
     for (final child in gameRef.world.children) {
       if (child is Enemy) {
@@ -335,7 +414,6 @@ class Player extends RectangleComponent with HasGameRef<VanguardGame> {
       }
     }
 
-    // 2. Animate Weapon
     if (enemyInDetectionRange) {
       stickWeapon.opacity = 1;
       _attackTimer += dt * 10;
@@ -345,12 +423,8 @@ class Player extends RectangleComponent with HasGameRef<VanguardGame> {
       _attackTimer = 0;
     }
 
-    // 3. Precise Collision Damage Logic
-    // Player deals damage ONLY if `stickWeapon` overlaps `enemy` AND is attacking
     if (isAttacking && _damageCooldown <= 0) {
       bool hitSomeone = false;
-      // Iterate enemies
-      // Using toList() to avoid concurrent mod issues if enemies die instantly
       for (final child in gameRef.world.children.toList()) {
         if (child is Enemy) {
           // Check overlap between Weapon Rect and Enemy Rect
@@ -362,7 +436,7 @@ class Player extends RectangleComponent with HasGameRef<VanguardGame> {
       }
 
       if (hitSomeone) {
-        _damageCooldown = 0.5; // Attack rate limit
+        _damageCooldown = 0.5;
       }
     }
   }
@@ -372,7 +446,6 @@ class Player extends RectangleComponent with HasGameRef<VanguardGame> {
     skillEffect.angle += dt * 10;
     for (final child in gameRef.world.children.toList()) {
       if (child is Enemy) {
-        // Skill remains distance based for now as per prompt focusing on Weapon Hitboxes
         if (position.distanceTo(child.position) < skillRange + 25) {
            if (!_skillHitTargets.contains(child)) {
              child.takeDamage(50);
@@ -389,34 +462,38 @@ class Player extends RectangleComponent with HasGameRef<VanguardGame> {
 }
 
 class Enemy extends RectangleComponent with HasGameRef<VanguardGame> {
+  static final Vector2 enemySize = Vector2(35, 56); // 70% of 50x80
+
   final Paint _normalPaint = BasicPalette.purple.paint();
   final Paint _damagePaint = BasicPalette.red.paint();
   final Paint _weaponPaint = BasicPalette.red.paint();
 
   // Health
-  double maxHp = 40; // Reduced from 100
+  double maxHp = 40;
   double hp = 40;
   double speed = 100;
   double attackRange = 70;
-  double damage = 5; // Reduced from 10
+  double damage = 5;
 
-  double _damageTimer = 0; // Visual flash timer
-  double _attackCooldown = 0; // Attack frequency
+  double _damageTimer = 0;
+  double _attackCooldown = 0;
   double _swingTimer = 0;
-  double _hitCooldown = 0; // Invulnerability timer
+  double _hitCooldown = 0;
 
-  late final Weapon weaponVisual; // Renamed as requested
+  late final Weapon weaponVisual;
 
   bool get isAttacking => weaponVisual.opacity > 0;
 
-  Enemy({required Vector2 position, double hpScale = 1.0})
+  Enemy({required Vector2 position, int levelScale = 1})
       : super(
           position: position,
-          size: Vector2(50, 80),
+          size: enemySize,
           anchor: Anchor.bottomCenter,
         ) {
      paint = _normalPaint;
-     maxHp = 40 * hpScale; // Base 40 * scale
+     // Scaling: 40 * (1 + level * 0.1) as per memory, but user prompt says "Scales with level"
+     // Prompt: "Enemy Max HP: 40 (Scales with level)."
+     maxHp = 40.0 * (1.0 + (levelScale * 0.1));
      hp = maxHp;
   }
 
@@ -439,9 +516,7 @@ class Enemy extends RectangleComponent with HasGameRef<VanguardGame> {
     if (_hitCooldown > 0) return;
 
     hp -= amount;
-    _hitCooldown = 0.2; // Invulnerability window
-
-    // Visual Feedback
+    _hitCooldown = 0.2;
     takeDamageEffect();
 
     gameRef.world.add(
@@ -467,7 +542,6 @@ class Enemy extends RectangleComponent with HasGameRef<VanguardGame> {
     super.update(dt);
     priority = position.y.toInt();
 
-    // Timers
     if (_damageTimer > 0) {
       _damageTimer -= dt;
       if (_damageTimer <= 0) paint = _normalPaint;
@@ -476,6 +550,9 @@ class Enemy extends RectangleComponent with HasGameRef<VanguardGame> {
 
     // AI
     final player = gameRef.player;
+    // Simple check if player is alive (though engine pauses on game over)
+    if (player.hp <= 0) return;
+
     final dist = position.distanceTo(player.position);
 
     if (player.position.x < position.x) {
@@ -505,11 +582,10 @@ class Enemy extends RectangleComponent with HasGameRef<VanguardGame> {
       _attackCooldown -= dt;
     }
 
-    // Damage Check: Enemy Weapon overlaps Player Body
     if (_attackCooldown <= 0) {
       if (weaponVisual.toAbsoluteRect().overlaps(player.toAbsoluteRect())) {
          player.takeDamage(damage);
-         _attackCooldown = 1.0; // 1 second between hits
+         _attackCooldown = 1.0;
       }
     }
   }
@@ -518,7 +594,7 @@ class Enemy extends RectangleComponent with HasGameRef<VanguardGame> {
 class Rock extends CircleComponent {
   Rock({required Vector2 position})
       : super(
-          radius: 30, // 60px diameter
+          radius: 30,
           position: position,
           anchor: Anchor.center,
           paint: BasicPalette.gray.paint(),
@@ -537,7 +613,7 @@ class HealthBarComponent extends PositionComponent with HasAncestor<Enemy> {
 
   HealthBarComponent() : super(
     position: Vector2(0, -10),
-    size: Vector2(50, 5),
+    size: Vector2(35, 5), // Adjusted to fit new width (was 50)
   );
 
   @override
@@ -546,6 +622,8 @@ class HealthBarComponent extends PositionComponent with HasAncestor<Enemy> {
     final enemy = ancestor;
     double hpPercent = 0;
     if (enemy.maxHp > 0) hpPercent = enemy.hp / enemy.maxHp;
+    if (hpPercent < 0) hpPercent = 0;
+
     canvas.drawRect(
       Rect.fromLTWH(0, 0, size.x * hpPercent, size.y),
       _barForePaint
@@ -559,16 +637,13 @@ class PlayerHealthBar extends PositionComponent {
   final Paint _barForePaint = BasicPalette.blue.paint();
 
   PlayerHealthBar({required this.player}) : super(
-    position: Vector2(20, 120), // Below XP Bar
+    position: Vector2(20, 120),
     size: Vector2(200, 20),
   );
 
   @override
   void render(Canvas canvas) {
-    // Draw Background
     canvas.drawRect(size.toRect(), _barBackPaint);
-
-    // Draw Foreground (Health)
     double hpPercent = 0;
     if (player.maxHp > 0) {
       hpPercent = player.hp / player.maxHp;
@@ -589,7 +664,7 @@ class XpBarComponent extends PositionComponent {
   final Paint _barForePaint = BasicPalette.yellow.paint();
 
   XpBarComponent({required this.player}) : super(
-    position: Vector2(20, 100), // Below Level Text
+    position: Vector2(20, 100),
     size: Vector2(200, 15),
   );
 
