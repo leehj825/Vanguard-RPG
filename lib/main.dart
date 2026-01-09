@@ -1,5 +1,6 @@
 import 'dart:math';
 
+import 'package:flame/collisions.dart';
 import 'package:flame/components.dart';
 import 'package:flame/effects.dart';
 import 'package:flame/game.dart';
@@ -160,9 +161,45 @@ class VanguardGame extends FlameGame with HasCollisionDetection {
   }
 }
 
-class Player extends RectangleComponent with HasGameRef<VanguardGame> {
+class Weapon extends RectangleComponent with CollisionCallbacks {
+  final Set<PositionComponent> currentlyColliding = {};
+
+  Weapon({
+    required Vector2 size,
+    required Paint paint,
+    required Vector2 position,
+    required Anchor anchor,
+    double angle = 0,
+  }) : super(
+          size: size,
+          paint: paint,
+          position: position,
+          anchor: anchor,
+          angle: angle,
+        );
+
+  @override
+  Future<void> onLoad() async {
+    add(RectangleHitbox());
+  }
+
+  @override
+  void onCollisionStart(
+      Set<Vector2> intersectionPoints, PositionComponent other) {
+    super.onCollisionStart(intersectionPoints, other);
+    currentlyColliding.add(other);
+  }
+
+  @override
+  void onCollisionEnd(PositionComponent other) {
+    super.onCollisionEnd(other);
+    currentlyColliding.remove(other);
+  }
+}
+
+class Player extends RectangleComponent
+    with HasGameRef<VanguardGame>, CollisionCallbacks {
   static const double speed = 200;
-  static const double weaponRange = 100;
   static const double skillRange = 150;
 
   // Stats
@@ -171,13 +208,15 @@ class Player extends RectangleComponent with HasGameRef<VanguardGame> {
   double targetXp = 100;
   double stickDamage = 10;
 
+  double maxHp = 100;
+  double hp = 100;
+
   // Visuals
   final Paint _normalPaint = BasicPalette.white.paint();
-  final Paint _attackPaint = BasicPalette.red.paint();
   final Paint _brownPaint = BasicPalette.brown.paint();
 
   // Child Components
-  late final RectangleComponent weapon;
+  late final Weapon weapon;
   late final CircleComponent skillEffect;
 
   // State
@@ -199,9 +238,12 @@ class Player extends RectangleComponent with HasGameRef<VanguardGame> {
   Future<void> onLoad() async {
     paint = _normalPaint;
 
+    // Add Hitbox for receiving damage
+    add(RectangleHitbox());
+
     // Weapon (The Stick)
     // Anchored at the "hand" or center-right of the player
-    weapon = RectangleComponent(
+    weapon = Weapon(
       size: Vector2(60, 10),
       paint: _brownPaint,
       anchor: Anchor.centerLeft,
@@ -230,6 +272,8 @@ class Player extends RectangleComponent with HasGameRef<VanguardGame> {
       level++;
       targetXp *= 1.5;
       stickDamage += 10;
+      maxHp += 20; // Increase max HP on level up
+      hp = maxHp;  // Heal on level up
 
       // Visual Feedback
       gameRef.world.add(
@@ -246,6 +290,21 @@ class Player extends RectangleComponent with HasGameRef<VanguardGame> {
     _skillTimer = 1.0; // 1 second duration
     skillEffect.opacity = 1;
     _skillHitTargets.clear(); // Reset hit targets for new skill activation
+  }
+
+  void takeDamage(double amount) {
+    hp -= amount;
+    if (hp < 0) hp = 0;
+
+    // Optional: Add visual feedback for player damage
+    // For now, console log or similar, as no Player Health Bar was requested visually,
+    // but the mechanics are implemented.
+    if (hp == 0) {
+      // Game Over logic could go here.
+      // For endless runner, maybe just respawn or reset level.
+      // For now, just heal back to full to loop endless.
+      hp = maxHp;
+    }
   }
 
   @override
@@ -277,8 +336,8 @@ class Player extends RectangleComponent with HasGameRef<VanguardGame> {
     // Depth System (Z-Ordering)
     priority = position.y.toInt();
 
-    // Auto-Attack Logic
-    _checkAutoAttack(dt);
+    // Weapon Logic (Attack & Damage)
+    _handleWeaponLogic(dt);
 
     // Skill Logic
     if (_isSkillActive) {
@@ -286,49 +345,53 @@ class Player extends RectangleComponent with HasGameRef<VanguardGame> {
     }
   }
 
-  void _checkAutoAttack(double dt) {
-    bool enemyInRange = false;
-    bool dealtDamage = false;
+  void _handleWeaponLogic(double dt) {
+    // 1. Determine if we should attack (auto-attack based on range still needed to trigger animation?)
+    // The prompt says "Remove the old 'distance-based' damage logic."
+    // But we still need to know when to swing the weapon.
+    // Let's assume auto-attack swings if ANY enemy is in a "detection range"
+    // OR just use the previous "range" check to trigger the animation,
+    // BUT damage is ONLY dealt via collision.
 
-    // Countdown damage cooldown
-    if (_damageCooldown > 0) {
-      _damageCooldown -= dt;
-    }
-
-    // Iterate through all children in the world to find Enemies.
-    // Use toList() to avoid concurrent modification when enemies are removed or added.
-    for (final child in gameRef.world.children.toList()) {
+    bool enemyInDetectionRange = false;
+    // Check purely for animation triggering
+    for (final child in gameRef.world.children) {
       if (child is Enemy) {
-        final distance = position.distanceTo(child.position);
-        if (distance < weaponRange) {
-          enemyInRange = true;
-
-          // Apply Damage if cooldown ready
-          if (_damageCooldown <= 0) {
-             child.takeDamage(stickDamage);
-             dealtDamage = true;
-          }
+        if (position.distanceTo(child.position) < 100) {
+          enemyInDetectionRange = true;
+          break;
         }
       }
     }
 
-    // Reset cooldown if we dealt damage to anyone
-    if (dealtDamage) {
-      _damageCooldown = 0.5;
-    }
-
-    // Update Visual State
-    if (enemyInRange) {
-      paint = _attackPaint;
+    // 2. Animate Weapon
+    if (enemyInDetectionRange) {
       weapon.opacity = 1;
-
-      // Animate weapon: Sine wave swinging
       _attackTimer += dt * 10;
       weapon.angle = sin(_attackTimer) * 0.5;
     } else {
-      paint = _normalPaint;
       weapon.opacity = 0;
       _attackTimer = 0;
+    }
+
+    // 3. Collision Damage Logic
+    if (_damageCooldown > 0) {
+      _damageCooldown -= dt;
+    }
+
+    // Only deal damage if weapon is visible (attacking) AND cooldown is ready
+    if (weapon.opacity > 0 && _damageCooldown <= 0) {
+      bool dealtDamage = false;
+      for (final other in weapon.currentlyColliding) {
+        if (other is Enemy) {
+           other.takeDamage(stickDamage);
+           dealtDamage = true;
+        }
+      }
+
+      if (dealtDamage) {
+        _damageCooldown = 0.5; // 0.5s between hits
+      }
     }
   }
 
@@ -338,7 +401,9 @@ class Player extends RectangleComponent with HasGameRef<VanguardGame> {
     // Rotate the effect
     skillEffect.angle += dt * 10; // Fast rotation
 
-    // Check for damage
+    // Check for damage (Skill still uses distance/radius check as requested "Skills apply instant damage... once per activation")
+    // Note: User prompt focused on "Precise Weapon Hitboxes", not changing Skill logic.
+    // So we keep the existing skill logic but ensure it uses the copy of children list.
     for (final child in gameRef.world.children.toList()) {
       if (child is Enemy) {
         final distance = position.distanceTo(child.position);
@@ -359,15 +424,22 @@ class Player extends RectangleComponent with HasGameRef<VanguardGame> {
   }
 }
 
-class Enemy extends RectangleComponent with HasGameRef<VanguardGame> {
+class Enemy extends RectangleComponent with HasGameRef<VanguardGame>, CollisionCallbacks {
   final Paint _normalPaint = BasicPalette.purple.paint();
   final Paint _damagePaint = BasicPalette.red.paint();
+  final Paint _weaponPaint = BasicPalette.red.paint(); // Red stick for enemy
 
   // Health
   double maxHp = 100;
   double hp = 100;
+  double speed = 100;
+  double attackRange = 70;
 
   double _damageTimer = 0;
+  double _attackCooldown = 0;
+  double _swingTimer = 0;
+
+  late final Weapon weapon;
 
   Enemy({required Vector2 position, double hpScale = 1.0})
       : super(
@@ -382,8 +454,19 @@ class Enemy extends RectangleComponent with HasGameRef<VanguardGame> {
 
   @override
   Future<void> onLoad() async {
-    // Add Health Bar as a child component
+    add(RectangleHitbox());
     add(HealthBarComponent());
+
+    // Enemy Weapon
+    weapon = Weapon(
+      size: Vector2(60, 10),
+      paint: _weaponPaint,
+      anchor: Anchor.centerLeft,
+      position: Vector2(size.x / 2, size.y / 2),
+      angle: -pi / 4,
+    );
+    weapon.opacity = 0; // Hidden until attacking
+    add(weapon);
   }
 
   void takeDamage(double amount) {
@@ -427,6 +510,58 @@ class Enemy extends RectangleComponent with HasGameRef<VanguardGame> {
       _damageTimer -= dt;
       if (_damageTimer <= 0) {
         paint = _normalPaint;
+      }
+    }
+
+    // AI Behavior
+    final player = gameRef.player;
+    final dist = position.distanceTo(player.position);
+
+    // Face the player
+    if (player.position.x < position.x) {
+      scale.x = -1; // Face Left (original is right-facing?)
+      // If scale.x is -1, the weapon (child) also flips, which is good.
+    } else {
+      scale.x = 1; // Face Right
+    }
+
+    if (dist > attackRange) {
+      // Chase
+      final dir = (player.position - position).normalized();
+      position.add(dir * speed * dt);
+
+      // Stop attacking while moving
+      weapon.opacity = 0;
+      _swingTimer = 0;
+    } else {
+      // Stop and Attack
+      _performAttack(dt);
+    }
+  }
+
+  void _performAttack(double dt) {
+    // Attack Animation
+    weapon.opacity = 1;
+    _swingTimer += dt * 10;
+    weapon.angle = sin(_swingTimer) * 0.5;
+
+    // Cooldown Logic
+    if (_attackCooldown > 0) {
+      _attackCooldown -= dt;
+    }
+
+    // Damage Logic (Hitbox based)
+    if (_attackCooldown <= 0) {
+      bool hitPlayer = false;
+      for (final other in weapon.currentlyColliding) {
+        if (other is Player) {
+           other.takeDamage(10); // Fixed damage for enemy for now
+           hitPlayer = true;
+        }
+      }
+
+      if (hitPlayer) {
+        _attackCooldown = 1.0; // Enemy attacks once per second
       }
     }
   }
