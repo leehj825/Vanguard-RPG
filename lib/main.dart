@@ -592,7 +592,7 @@ class LootBox extends PositionComponent with HasGameRef<VanguardGame> {
   @override
   Future<void> onLoad() async {
     add(RectangleComponent(size: size, paint: Paint()..color = const Color(0xFFFFD700)));
-    add(MoveEffect.by(Vector2(0, -10), EffectController(duration: 1, reverse: true, infinite: true)));
+    add(MoveEffect.by(Vector2(0, -10), EffectController(duration: 1, alternate: true, infinite: true)));
   }
   void pickup() {
     final type = WeaponType.values[Random().nextInt(WeaponType.values.length)];
@@ -605,7 +605,7 @@ class LootBox extends PositionComponent with HasGameRef<VanguardGame> {
 class Rock extends PositionComponent {
   Rock({required Vector2 position}) : super(position: position, size: Vector2(50, 30), anchor: Anchor.bottomCenter);
   @override
-  Future<void> onLoad() async { add(CircleComponent(size: size, paint: BasicPalette.gray.paint())); }
+  Future<void> onLoad() async { add(CircleComponent(radius: size.x / 2, paint: BasicPalette.gray.paint())); }
   @override
   void update(double dt) { super.update(dt); priority = position.y.toInt(); }
 }
