@@ -1,7 +1,7 @@
 import 'dart:math';
 
 import 'package:flame/components.dart';
-import 'package:flame/effects.dart'; // Added for DamageText effects
+import 'package:flame/effects.dart';
 import 'package:flame/game.dart';
 import 'package:flame/input.dart';
 import 'package:flame/palette.dart';
@@ -81,6 +81,7 @@ class Player extends RectangleComponent with HasGameRef<VanguardGame> {
   // Visuals
   final Paint _normalPaint = BasicPalette.white.paint();
   final Paint _attackPaint = BasicPalette.red.paint();
+  final Paint _brownPaint = BasicPalette.brown.paint();
 
   // Child Components
   late final RectangleComponent weapon;
@@ -109,7 +110,7 @@ class Player extends RectangleComponent with HasGameRef<VanguardGame> {
     // Anchored at the "hand" or center-right of the player
     weapon = RectangleComponent(
       size: Vector2(60, 10),
-      paint: BasicPalette.brown.paint(),
+      paint: _brownPaint,
       anchor: Anchor.centerLeft,
       position: Vector2(size.x / 2, size.y / 2),
       angle: -pi / 4, // Initial angle up
@@ -261,6 +262,12 @@ class Enemy extends RectangleComponent with HasGameRef<VanguardGame> {
      paint = _normalPaint;
   }
 
+  @override
+  Future<void> onLoad() async {
+    // Add Health Bar as a child component
+    add(HealthBarComponent());
+  }
+
   void takeDamage(double amount) {
     hp -= amount;
     if (hp < 0) hp = 0;
@@ -289,34 +296,6 @@ class Enemy extends RectangleComponent with HasGameRef<VanguardGame> {
   }
 
   @override
-  void render(Canvas canvas) {
-    super.render(canvas); // Draw the enemy box
-
-    // Draw Health Bar
-    // Draw above the enemy. Local coordinates (0,0) is top-left of the box.
-    // Wait, RectangleComponent render uses the size.
-    // If we want to draw relative to the component, we use the local coordinates.
-    // The component size is 50x80.
-
-    const barWidth = 50.0;
-    const barHeight = 5.0;
-    const yOffset = -10.0; // 10 pixels above head
-
-    // Background (Red)
-    canvas.drawRect(
-      Rect.fromLTWH(0, yOffset, barWidth, barHeight),
-      BasicPalette.red.paint()
-    );
-
-    // Foreground (Green)
-    final hpPercent = hp / maxHp;
-    canvas.drawRect(
-      Rect.fromLTWH(0, yOffset, barWidth * hpPercent, barHeight),
-      BasicPalette.green.paint()
-    );
-  }
-
-  @override
   void update(double dt) {
     super.update(dt);
 
@@ -330,6 +309,33 @@ class Enemy extends RectangleComponent with HasGameRef<VanguardGame> {
         paint = _normalPaint;
       }
     }
+  }
+}
+
+class HealthBarComponent extends PositionComponent with HasAncestor<Enemy> {
+  final Paint _barBackPaint = BasicPalette.red.paint();
+  final Paint _barForePaint = BasicPalette.green.paint();
+
+  HealthBarComponent() : super(
+    position: Vector2(0, -10), // 10 pixels above head (relative to parent top-left if not scaled?)
+    // Note: Parent (Enemy) is 50x80. Anchor BottomCenter.
+    // Children positions are relative to the top-left of the parent's size box (0,0) to (50,80).
+    // So (0, -10) is 10px above the top edge.
+    size: Vector2(50, 5),
+  );
+
+  @override
+  void render(Canvas canvas) {
+    // Background
+    canvas.drawRect(size.toRect(), _barBackPaint);
+
+    // Foreground
+    final enemy = ancestor;
+    final hpPercent = enemy.hp / enemy.maxHp;
+    canvas.drawRect(
+      Rect.fromLTWH(0, 0, size.x * hpPercent, size.y),
+      _barForePaint
+    );
   }
 }
 
@@ -361,18 +367,10 @@ class DamageText extends TextComponent {
       ),
     );
 
-    // Fade Out Effect (Optional if supported, otherwise just remove)
-    // Note: TextComponent opacity handling varies.
-    // We will rely on RemoveEffect to clean it up.
+    // Fade Out Effect removed to prevent crashes/issues.
+    // Just remove after 1s.
     add(
       RemoveEffect(delay: 1.0),
-    );
-
-    // Attempt opacity effect (Works if TextComponent supports HasPaint in this version or wraps paint correctly)
-    add(
-      OpacityEffect.fadeOut(
-        LinearEffectController(1.0),
-      ),
     );
   }
 }
