@@ -300,6 +300,13 @@ class VanguardGame extends FlameGame with TapCallbacks {
       onPressed: () => player.activateSkill(),
       children: [TextComponent(text: "SWIRL", position: Vector2(25, 25), anchor: Anchor.center, textRenderer: TextPaint(style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.black)))]
     );
+    autoText = TextComponent(
+      text: "AUTO: ON",
+      textRenderer: TextPaint(style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
+      position: Vector2(50, 20),
+      anchor: Anchor.center,
+    );
+    autoButton.button!.add(autoText);
 
     autoButton = HudButtonComponent(
       button: RectangleComponent(size: Vector2(100, 40), paint: BasicPalette.black.withAlpha(150).paint()),
@@ -379,6 +386,7 @@ class VanguardGame extends FlameGame with TapCallbacks {
     autoText.text = player.autoAttackEnabled ? "AUTO: ON" : "AUTO: OFF";
     autoText.textRenderer = TextPaint(style: TextStyle(color: player.autoAttackEnabled ? Colors.green : Colors.red, fontWeight: FontWeight.bold));
   }
+}
 
   void spawnBoss() {
     gameState = GameState.bossBattle;
@@ -624,6 +632,8 @@ class Enemy extends PositionComponent with HasGameRef<VanguardGame> {
     maxHp *= hpScale; currentHp = maxHp;
     animator = StickmanAnimator(color: Colors.red, weaponType: WeaponType.sword);
   }
+
+  late RectangleComponent hpBar;
 
   @override
   Future<void> onLoad() async {
