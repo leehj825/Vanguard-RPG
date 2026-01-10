@@ -19,8 +19,15 @@ extension WeaponTypeExtension on WeaponType {
   String get name => toString().split('.').last.toUpperCase();
 }
 
+extension ShapeOpacity on ShapeComponent {
+  double get opacity => paint.color.opacity;
+  set opacity(double value) {
+    paint.color = paint.color.withOpacity(value);
+  }
+}
+
 // ================= GAME ENGINE =================
-class VanguardGame extends FlameGame with HasCollisionDetection, TapCallbacks {
+class VanguardGame extends FlameGame with TapCallbacks {
   late Player player;
   late final JoystickComponent joystick;
 
@@ -36,6 +43,7 @@ class VanguardGame extends FlameGame with HasCollisionDetection, TapCallbacks {
   double _distanceTraveled = 0;
   double _nextBossDistance = 1000;
   bool _bossActive = false;
+  double _bossWarningTimer = 0; // For blinking text
   double _time = 0; // Game time accumulator
 
   final Random _rnd = Random();
@@ -93,7 +101,8 @@ class VanguardGame extends FlameGame with HasCollisionDetection, TapCallbacks {
       text: "WARNING: BOSS APPROACHING!",
       anchor: Anchor.center,
       textRenderer: TextPaint(style: const TextStyle(color: Colors.red, fontSize: 32, fontWeight: FontWeight.bold, shadows: [Shadow(blurRadius: 10, color: Colors.black)])),
-    )..opacity = 0;
+    );
+    // Don't add bossWarningText to viewport yet. We add it when triggering boss.
 
     // --- WORLD ---
     player = Player(joystick, floorBounds: Vector2(200, 600));
@@ -109,7 +118,6 @@ class VanguardGame extends FlameGame with HasCollisionDetection, TapCallbacks {
     camera.viewport.add(xpLevelText);
     camera.viewport.add(PlayerHealthBar(player: player));
     camera.viewport.add(XpBarComponent(player: player));
-    camera.viewport.add(bossWarningText);
 
     spawnInitialObjects();
   }
@@ -161,7 +169,22 @@ class VanguardGame extends FlameGame with HasCollisionDetection, TapCallbacks {
     xpLevelText.text = 'Lvl ${player.level}';
 
     // --- SPAWNER & BOSS LOGIC ---
-    if (!_bossActive) {
+    if (_bossActive) {
+       // Handle Boss Warning Blink
+       if (bossWarningText.isVisible) {
+          _bossWarningTimer -= dt;
+          if (_bossWarningTimer > 0) {
+             // Blink every 0.5s
+             bossWarningText.textRenderer = TextPaint(
+               style: (bossWarningText.textRenderer as TextPaint).style.copyWith(
+                 color: (sin(_time * 10) > 0) ? Colors.red : Colors.transparent
+               )
+             );
+          } else {
+             bossWarningText.isVisible = false;
+          }
+       }
+    } else {
       // Check Boss Trigger
       if (_distanceTraveled > _nextBossDistance) {
         triggerBossSequence();
@@ -194,18 +217,12 @@ class VanguardGame extends FlameGame with HasCollisionDetection, TapCallbacks {
 
   void triggerBossSequence() {
     _bossActive = true;
+    _bossWarningTimer = 3.0;
 
-    // Flashing Warning
-    bossWarningText.opacity = 1;
-    bossWarningText.add(
-      SequenceEffect([
-        OpacityEffect.to(0, EffectController(duration: 0.5)),
-        OpacityEffect.to(1, EffectController(duration: 0.5)),
-        OpacityEffect.to(0, EffectController(duration: 0.5)),
-        OpacityEffect.to(1, EffectController(duration: 0.5)),
-        OpacityEffect.to(0, EffectController(duration: 1.0)), // Fade out
-      ])
-    );
+    // Add warning text to viewport
+    if (!camera.viewport.children.contains(bossWarningText)) {
+      camera.viewport.add(bossWarningText);
+    }
 
     // Spawn Boss after delay
     Future.delayed(const Duration(seconds: 3), () {
