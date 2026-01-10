@@ -391,7 +391,7 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
     if (!inventory.contains(newWeapon)) {
       inventory.add(newWeapon);
       gameRef.inventoryDisplay.updateInventoryVisuals();
-      gameRef.world.add(DamageText("Found ${newWeapon.name}!", position: position.clone()..y-=80, color: const Color(0xFFFFD700)));
+      gameRef.world.add(DamageText("Found ${newWeapon.name}!", position: position.clone()..y-=80, color: Colors.amber));
     }
   }
 
@@ -522,8 +522,7 @@ class Enemy extends PositionComponent with HasGameRef<VanguardGame> {
     Future.delayed(const Duration(milliseconds: 50), () => bodyVisual.paint = BasicPalette.purple.paint());
     gameRef.world.add(DamageText("-${amount.toInt()}", position: position.clone()..y-=60));
     if (currentHp <= 0) {
-      gameRef.player.currentXp += 35;
-      gameRef.player.gainXp(0); // Trigger level check
+      gameRef.player.gainXp(35);
       if (Random().nextDouble() < 0.25) gameRef.world.add(LootBox(position: position.clone()));
       removeFromParent();
     }
