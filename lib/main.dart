@@ -54,6 +54,15 @@ class StickmanAnimator {
     this.weaponType = WeaponType.none
   });
 
+  double get attackDuration {
+    switch (weaponType) {
+      case WeaponType.dagger: return 0.2;
+      case WeaponType.sword: return 0.5;
+      case WeaponType.axe: return 1.0;
+      default: return 0.3;
+    }
+  }
+
   void update(double dt, Vector2 velocity, bool isDashing) {
     _time += dt * 10;
 
@@ -70,7 +79,7 @@ class StickmanAnimator {
 
     if (isAttacking) {
       _attackTimer += dt;
-      if (_attackTimer > 0.3) {
+      if (_attackTimer > attackDuration) {
         isAttacking = false;
         _attackTimer = 0.0;
       }
@@ -113,23 +122,30 @@ class StickmanAnimator {
     double lArmAngle = -armSwing;
     double rArmAngle = armSwing;
 
-    if (isAttacking) rArmAngle = -1.5;
-    else if (weaponType != WeaponType.none) rArmAngle = -0.5;
+    if (isAttacking) {
+       // Circular Swing Logic
+       double p = (_attackTimer / attackDuration).clamp(0.0, 1.0);
+
+       if (weaponType == WeaponType.none) {
+          // Punch: Hold arm forward
+          rArmAngle = -1.5;
+       } else {
+          // Swing: Start Overhead (-2.8) -> End Forward/Down (-0.2)
+          rArmAngle = -2.8 + (2.6 * p);
+       }
+    } else if (weaponType != WeaponType.none) {
+       rArmAngle = -0.5;
+    }
 
     SimpleVector3 lElbow = _rotateX(SimpleVector3(-6, 10, 0), lArmAngle) + lShoulder;
     SimpleVector3 rElbow = _rotateX(SimpleVector3(6, 10, 0), rArmAngle) + rShoulder;
     SimpleVector3 lHand = _rotateX(SimpleVector3(0, 10, 0), lArmAngle - 0.3) + lElbow;
     SimpleVector3 rHand = _rotateX(SimpleVector3(0, 10, 0), rArmAngle - 0.3) + rElbow;
 
-    if (isAttacking) {
+    if (isAttacking && weaponType == WeaponType.none) {
        double punchProgress = sin((_attackTimer / 0.3) * pi);
-       if (weaponType == WeaponType.none) {
-          rHand.z += punchProgress * 15;
-          rHand.y -= punchProgress * 5;
-       } else {
-          rHand.y += punchProgress * 10;
-          rHand.z += punchProgress * 10;
-       }
+       rHand.z += punchProgress * 15;
+       rHand.y -= punchProgress * 5;
     }
 
     List<SimpleVector3> points = [hip, neck, lShoulder, rShoulder, lHip, rHip, lKnee, rKnee, lFoot, rFoot, lElbow, rElbow, lHand, rHand];
