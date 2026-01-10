@@ -386,7 +386,6 @@ class VanguardGame extends FlameGame with TapCallbacks {
     autoText.text = player.autoAttackEnabled ? "AUTO: ON" : "AUTO: OFF";
     autoText.textRenderer = TextPaint(style: TextStyle(color: player.autoAttackEnabled ? Colors.green : Colors.red, fontWeight: FontWeight.bold));
   }
-}
 
   void spawnBoss() {
     gameState = GameState.bossBattle;
