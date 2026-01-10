@@ -792,6 +792,7 @@ class InventoryDisplay extends PositionComponent with HasGameRef<VanguardGame> {
       case WeaponType.dagger: p = BasicPalette.yellow.paint(); s = Vector2(10, 10); break;
       case WeaponType.sword: p = BasicPalette.brown.paint(); s = Vector2(15, 15); break;
       case WeaponType.axe: p = BasicPalette.red.paint(); s = Vector2(20, 20); break;
+      case WeaponType.bow: p = BasicPalette.green.paint(); s = Vector2(15, 15); break;
       case WeaponType.none: p = BasicPalette.white.withAlpha(0).paint(); s = Vector2.zero(); break;
     }
     return RectangleComponent(size: s, paint: p, anchor: Anchor.center, position: center);
@@ -805,7 +806,14 @@ class InventorySlot extends RectangleComponent with TapCallbacks, HasGameRef<Van
 
   void setWeapon(WeaponType type) {
     storedWeapon = type;
-    Paint p = (type == WeaponType.dagger) ? BasicPalette.yellow.paint() : (type == WeaponType.sword) ? BasicPalette.brown.paint() : BasicPalette.red.paint();
+    Paint p;
+    switch(type) {
+      case WeaponType.dagger: p = BasicPalette.yellow.paint(); break;
+      case WeaponType.sword: p = BasicPalette.brown.paint(); break;
+      case WeaponType.axe: p = BasicPalette.red.paint(); break;
+      case WeaponType.bow: p = BasicPalette.green.paint(); break;
+      default: p = BasicPalette.gray.paint();
+    }
     add(RectangleComponent(size: size * 0.6, paint: p, anchor: Anchor.center, position: size/2));
   }
 
