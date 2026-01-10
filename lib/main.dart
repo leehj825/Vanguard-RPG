@@ -154,7 +154,9 @@ class StickmanAnimator {
        double len = 20.0;
        if (weaponType == WeaponType.dagger) len = 10.0;
        if (weaponType == WeaponType.axe) len = 25.0;
-       SimpleVector3 tipLocal = _rotateX(SimpleVector3(0, 0, len), rArmAngle);
+       // Weapon points along the arm (+Y) relative to hand
+       // Align rotation with forearm (rArmAngle - 0.3)
+       SimpleVector3 tipLocal = _rotateX(SimpleVector3(0, len, 0), rArmAngle - 0.3);
        points.add(rHand + tipLocal);
     }
 
