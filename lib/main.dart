@@ -62,7 +62,7 @@ class StickmanAnimator {
     _runWeight += (targetWeight - _runWeight) * dt * 5;
 
     if (speed > 10) {
-      double targetAngle = velocity.x > 0 ? pi / 2 : -pi / 2;
+      double targetAngle = velocity.x > 0 ? -pi / 2 : pi / 2;
       double diff = targetAngle - _facingAngle;
       if (diff.abs() > pi) diff -= 2 * pi * diff.sign;
       _facingAngle += diff * dt * 10;
@@ -167,7 +167,7 @@ class StickmanAnimator {
       if (weaponType == WeaponType.bow) {
         Offset hand = p2d[12];
         Paint bp = Paint()..color = Colors.brown..style = PaintingStyle.stroke..strokeWidth = 2;
-        canvas.drawArc(Rect.fromCenter(center: hand, width: 10, height: 30), (_facingAngle > 0 ? -pi/2 : pi/2), pi, false, bp);
+        canvas.drawArc(Rect.fromCenter(center: hand, width: 10, height: 30), (_facingAngle > 0 ? pi/2 : -pi/2), pi, false, bp);
       }
     }
 
