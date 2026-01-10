@@ -147,46 +147,74 @@ class StickmanAnimator {
     }
     List<Offset> p2d = points.map((p) => _project(p, Vector2.zero())).toList();
 
-    // Draw Body
-    canvas.drawLine(p2d[0], p2d[1], paint);
+    // Helper functions for segmented drawing
+    void drawBody() {
+      // Draw Body
+      canvas.drawLine(p2d[0], p2d[1], paint);
+      // Draw Head
+      Offset headCenter = p2d[1] + const Offset(0, -8);
+      canvas.drawCircle(headCenter, 6, fillPaint);
+    }
 
-    // Draw Head
-    // Fixed logic: Use the projected neck position correctly
-    Offset headCenter = p2d[1] + const Offset(0, -8);
-    canvas.drawCircle(headCenter, 6, fillPaint);
+    void drawLeft() {
+      // Left Leg
+      canvas.drawLine(p2d[0], p2d[6], paint);
+      canvas.drawLine(p2d[6], p2d[8], paint);
+      // Left Arm
+      canvas.drawLine(p2d[1], p2d[10], paint);
+      canvas.drawLine(p2d[10], p2d[12], paint);
+      // Bow (Left Hand)
+      if (weaponType == WeaponType.bow) {
+        Offset hand = p2d[12];
+        Paint bp = Paint()..color = Colors.brown..style = PaintingStyle.stroke..strokeWidth = 2;
+        canvas.drawArc(Rect.fromCenter(center: hand, width: 10, height: 30), (_facingAngle > 0 ? -pi/2 : pi/2), pi, false, bp);
+      }
+    }
 
-    // Legs
-    canvas.drawLine(p2d[0], p2d[6], paint); canvas.drawLine(p2d[6], p2d[8], paint);
-    canvas.drawLine(p2d[0], p2d[7], paint); canvas.drawLine(p2d[7], p2d[9], paint);
-    // Arms
-    canvas.drawLine(p2d[1], p2d[10], paint); canvas.drawLine(p2d[10], p2d[12], paint);
-    canvas.drawLine(p2d[1], p2d[11], paint); canvas.drawLine(p2d[11], p2d[13], paint);
+    void drawRight() {
+      // Right Leg
+      canvas.drawLine(p2d[0], p2d[7], paint);
+      canvas.drawLine(p2d[7], p2d[9], paint);
+      // Right Arm
+      canvas.drawLine(p2d[1], p2d[11], paint);
+      canvas.drawLine(p2d[11], p2d[13], paint);
+      // Melee Weapon (Right Hand)
+      if (weaponType != WeaponType.none && weaponType != WeaponType.bow) {
+        Offset hand = p2d[13];
+        Offset tip = p2d.last;
+        Paint wp = Paint()..color = Colors.white..style = PaintingStyle.stroke..strokeWidth = 2;
+        if (weaponType == WeaponType.dagger) wp.color = Colors.yellow;
+        if (weaponType == WeaponType.sword) wp.color = Colors.brown;
+        if (weaponType == WeaponType.axe) wp.color = Colors.red;
 
-    // Draw Weapon
-    if (weaponType != WeaponType.none && weaponType != WeaponType.bow) {
-       Offset hand = p2d[13];
-       Offset tip = p2d.last;
-       Paint wp = Paint()..color = Colors.white..style = PaintingStyle.stroke..strokeWidth = 2;
-       if (weaponType == WeaponType.dagger) wp.color = Colors.yellow;
-       if (weaponType == WeaponType.sword) wp.color = Colors.brown;
-       if (weaponType == WeaponType.axe) wp.color = Colors.red;
+        canvas.drawLine(hand, tip, wp);
 
-       canvas.drawLine(hand, tip, wp);
+        if (weaponType == WeaponType.axe) {
+          canvas.drawCircle(tip, 6, Paint()..color = Colors.grey..style = PaintingStyle.fill);
+        }
+        if (weaponType == WeaponType.sword) {
+          Offset mid = hand + (tip - hand) * 0.2;
+          Offset perp = Offset(tip.dy - hand.dy, hand.dx - tip.dx);
+          double len = sqrt(perp.dx*perp.dx + perp.dy*perp.dy);
+          if (len > 0) perp = perp.scale(1/len, 1/len) * 5.0;
+          canvas.drawLine(mid - perp, mid + perp, wp);
+        }
+      }
+    }
 
-       if (weaponType == WeaponType.axe) {
-         canvas.drawCircle(tip, 6, Paint()..color = Colors.grey..style = PaintingStyle.fill);
-       }
-       if (weaponType == WeaponType.sword) {
-         Offset mid = hand + (tip - hand) * 0.2;
-         Offset perp = Offset(tip.dy - hand.dy, hand.dx - tip.dx);
-         double len = sqrt(perp.dx*perp.dx + perp.dy*perp.dy);
-         if (len > 0) perp = perp.scale(1/len, 1/len) * 5.0;
-         canvas.drawLine(mid - perp, mid + perp, wp);
-       }
-    } else if (weaponType == WeaponType.bow) {
-       Offset hand = p2d[12];
-       Paint bp = Paint()..color = Colors.brown..style = PaintingStyle.stroke..strokeWidth = 2;
-       canvas.drawArc(Rect.fromCenter(center: hand, width: 10, height: 30), (_facingAngle > 0 ? -pi/2 : pi/2), pi, false, bp);
+    // Determine Draw Order based on Facing Angle
+    // If sin > 0 (Face Right), Right Side is Back (-Z), Left is Front (+Z).
+    // Order: Right -> Body -> Left
+    // If sin < 0 (Face Left), Left Side is Back (-Z), Right is Front (+Z).
+    // Order: Left -> Body -> Right
+    if (sin(_facingAngle) >= 0) {
+       drawRight();
+       drawBody();
+       drawLeft();
+    } else {
+       drawLeft();
+       drawBody();
+       drawRight();
     }
     canvas.restore();
   }
