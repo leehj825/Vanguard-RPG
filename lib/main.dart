@@ -37,7 +37,7 @@ class VanguardGame extends FlameGame with HasCollisionDetection, TapCallbacks {
 
   @override
   Future<void> onLoad() async {
-    camera.viewfinder.anchor = Anchor.topLeft;
+    camera.viewfinder.anchor = Anchor.center;
 
     // --- HUD SETUP ---
     final knobPaint = BasicPalette.white.withAlpha(200).paint();
@@ -156,9 +156,8 @@ class VanguardGame extends FlameGame with HasCollisionDetection, TapCallbacks {
     if (isGameOver) return;
 
     // Camera Sync
-    double targetX = player.position.x - 100;
-    if (targetX < 0) targetX = 0;
-    camera.viewfinder.position = Vector2(targetX, 0);
+    // Center camera on player X, fix Y to 0 or appropriate height
+    camera.viewfinder.position = Vector2(player.position.x, 300); // 300 centers vertically for floor bounds
 
     // NOTE: HUD elements are now in camera.viewport, so they do NOT need manual position updates relative to camera.
 
@@ -323,6 +322,7 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
   bool isSwirling = false;
   double _swingTimer = 0;
   double _damageCooldown = 0;
+  final Set<Enemy> _hitTargets = {}; // Track enemies hit per swing
   Vector2 facingDirection = Vector2(1, 0);
 
   Player(this.joystick, {required this.floorBounds})
@@ -366,6 +366,7 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
     isAttacking = true;
     _swingTimer = 0;
     stickWeapon.opacity = 1;
+    _hitTargets.clear();
   }
 
   void gainXp(double amount) {
@@ -435,7 +436,10 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
            for (final child in gameRef.world.children.toList()) {
             if (child is Enemy) {
               if (stickWeapon.toAbsoluteRect().overlaps(child.bodyVisual.toAbsoluteRect())) {
-                 child.takeDamage(damage * dt * 5);
+                 if (!_hitTargets.contains(child)) {
+                    child.takeDamage(damage);
+                    _hitTargets.add(child);
+                 }
               }
             }
           }
