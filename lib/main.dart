@@ -14,6 +14,7 @@ void main() {
 
 // ================= ENUMS =================
 enum WeaponType { dagger, sword, axe }
+enum GameState { running, bossWarning, bossBattle }
 
 extension WeaponTypeExtension on WeaponType {
   String get name => toString().split('.').last.toUpperCase();
@@ -22,16 +23,29 @@ extension WeaponTypeExtension on WeaponType {
 // ================= GAME ENGINE =================
 class VanguardGame extends FlameGame with HasCollisionDetection, TapCallbacks {
   late Player player;
-  late final JoystickComponent joystick;
 
   // HUD Elements
+  late JoystickComponent joystick;
+  late HudButtonComponent attackButton;
+  late HudButtonComponent skillButton;
+  late HudButtonComponent autoButton;
   late InventoryDisplay inventoryDisplay;
   late TextComponent autoText;
   late TextComponent distanceText;
   late TextComponent xpLevelText;
+  late PlayerHealthBar playerHealthBar;
+  late XpBarComponent xpBar;
+
+  // Boss Elements
+  late TextComponent bossWarningText;
+  late BossHealthBar bossHealthBar;
+  BossEnemy? currentBoss;
 
   // Systems
+  GameState gameState = GameState.running;
   double _spawnTimer = 0;
+  double _bossWarningTimer = 0;
+  double _lastBossTriggerX = 0;
   final Random _rnd = Random();
   bool isGameOver = false;
 
@@ -47,28 +61,25 @@ class VanguardGame extends FlameGame with HasCollisionDetection, TapCallbacks {
     joystick = JoystickComponent(
       knob: CircleComponent(radius: 20, paint: knobPaint),
       background: CircleComponent(radius: 50, paint: backgroundPaint),
-      margin: const EdgeInsets.only(left: 40, bottom: 40),
     );
 
     // Manual Attack (Red)
-    final attackButton = HudButtonComponent(
+    attackButton = HudButtonComponent(
       button: CircleComponent(radius: 35, paint: BasicPalette.red.withAlpha(200).paint()),
-      margin: const EdgeInsets.only(right: 40, bottom: 20),
       onPressed: () => player.startAttack(),
       children: [
         TextComponent(
           text: "ATK",
           textRenderer: TextPaint(style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
-          position: Vector2(22, 25), // Approx center
+          position: Vector2(22, 25),
           anchor: Anchor.center,
         )
       ]
     );
 
-    // Skill Button (Blue) with Label
-    final skillButton = HudButtonComponent(
+    // Skill Button (Blue)
+    skillButton = HudButtonComponent(
       button: CircleComponent(radius: 25, paint: BasicPalette.cyan.withAlpha(200).paint()),
-      margin: const EdgeInsets.only(right: 40, bottom: 100),
       onPressed: () => player.activateSkill(),
       children: [
         TextComponent(
@@ -80,10 +91,9 @@ class VanguardGame extends FlameGame with HasCollisionDetection, TapCallbacks {
       ]
     );
 
-    // Auto Toggle (Top Right)
-    final autoButton = HudButtonComponent(
+    // Auto Toggle
+    autoButton = HudButtonComponent(
       button: RectangleComponent(size: Vector2(100, 40), paint: BasicPalette.black.withAlpha(150).paint()),
-      margin: const EdgeInsets.only(right: 20, top: 20),
       onPressed: toggleAuto,
     );
     autoText = TextComponent(
@@ -94,31 +104,37 @@ class VanguardGame extends FlameGame with HasCollisionDetection, TapCallbacks {
     );
     autoButton.button!.add(autoText);
 
-    // 2. Inventory UI (Top Center)
+    // 2. Inventory UI
     inventoryDisplay = InventoryDisplay();
-    // Assuming screen width ~800, center is ~400. Inventory is 350 wide.
-    // Position relative to viewport (0,0 is top left)
-    inventoryDisplay.position = Vector2(225, 20); // Approximation
 
-    // 3. Stats UI (Top Left)
+    // 3. Stats UI
     distanceText = TextComponent(
       text: 'Distance: 0m',
-      position: Vector2(20, 20),
       textRenderer: TextPaint(style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
     );
 
     xpLevelText = TextComponent(
       text: 'Lvl 1',
-      position: Vector2(20, 40),
       textRenderer: TextPaint(style: const TextStyle(color: Colors.yellow, fontSize: 16, fontWeight: FontWeight.bold)),
     );
+
+    // 4. Boss UI
+    bossWarningText = TextComponent(
+      text: "BOSS WARNING",
+      textRenderer: TextPaint(style: const TextStyle(color: Colors.red, fontSize: 40, fontWeight: FontWeight.bold, shadows: [Shadow(blurRadius: 10, color: Colors.black)])),
+      anchor: Anchor.center,
+    )..opacity = 0; // Hidden by default
+
+    bossHealthBar = BossHealthBar(game: this); // Hidden by default inside class logic or opacity
 
     // --- WORLD ---
     player = Player(joystick, floorBounds: Vector2(200, 600));
     world.add(player);
 
+    playerHealthBar = PlayerHealthBar(player: player);
+    xpBar = XpBarComponent(player: player);
+
     // --- HUD (Viewport) ---
-    // Add HUD elements to camera.viewport so they stay static relative to screen
     camera.viewport.add(joystick);
     camera.viewport.add(attackButton);
     camera.viewport.add(skillButton);
@@ -126,11 +142,58 @@ class VanguardGame extends FlameGame with HasCollisionDetection, TapCallbacks {
     camera.viewport.add(inventoryDisplay);
     camera.viewport.add(distanceText);
     camera.viewport.add(xpLevelText);
-    camera.viewport.add(PlayerHealthBar(player: player));
-    camera.viewport.add(XpBarComponent(player: player));
+    camera.viewport.add(playerHealthBar);
+    camera.viewport.add(xpBar);
+    camera.viewport.add(bossWarningText);
+    camera.viewport.add(bossHealthBar);
 
-    // Initial Spawns
     spawnInitialObjects();
+    _updateHudPositions(size);
+  }
+
+  @override
+  void onGameResize(Vector2 size) {
+    super.onGameResize(size);
+
+    // 1. Responsive Zoom
+    // Portrait: width 450. Landscape: height 800.
+    bool isPortrait = size.y > size.x;
+    double targetZoom = isPortrait ? size.x / 450 : size.y / 800;
+    camera.viewfinder.zoom = targetZoom;
+
+    // 2. Responsive HUD Positioning
+    if (isLoaded) {
+      _updateHudPositions(size);
+    }
+  }
+
+  void _updateHudPositions(Vector2 size) {
+    double margin = 40;
+
+    // Joystick: Bottom Left
+    joystick.position = Vector2(margin + 20, size.y - margin - 20);
+
+    // Buttons: Bottom Right
+    attackButton.position = Vector2(size.x - 60, size.y - 60);
+    skillButton.position = Vector2(size.x - 140, size.y - 60);
+
+    // Auto Toggle: Top Right
+    autoButton.position = Vector2(size.x - 120, 20);
+
+    // Inventory: Top Center
+    inventoryDisplay.position = Vector2(size.x / 2 - 175, 20);
+
+    // Stats: Top Left
+    distanceText.position = Vector2(20, 20);
+    xpLevelText.position = Vector2(20, 45);
+
+    // Bars: Below Stats
+    playerHealthBar.position = Vector2(20, 70);
+    xpBar.position = Vector2(20, 90);
+
+    // Boss Elements: Center / Top
+    bossWarningText.position = size / 2;
+    bossHealthBar.position = Vector2(size.x / 2 - 200, 80); // Below inventory
   }
 
   void spawnInitialObjects() {
@@ -150,40 +213,81 @@ class VanguardGame extends FlameGame with HasCollisionDetection, TapCallbacks {
     }
   }
 
+  void spawnBoss() {
+    gameState = GameState.bossBattle;
+    double spawnX = player.position.x + 500;
+    double spawnY = 300; // Center Y roughly
+
+    // Boss Stats Scale with Level
+    double hpScale = 1.0 + (player.level * 0.2);
+    currentBoss = BossEnemy(position: Vector2(spawnX, spawnY), hpScale: hpScale);
+    world.add(currentBoss!);
+  }
+
+  void onBossDefeated() {
+    gameState = GameState.running;
+    currentBoss = null;
+    _spawnTimer = 2.0; // Grace period
+    _lastBossTriggerX = player.position.x; // Reset trigger
+  }
+
   @override
   void update(double dt) {
-    super.update(dt);
     if (isGameOver) return;
+    super.update(dt);
 
     // Camera Sync
-    // Center camera on player X, fix Y to 0 or appropriate height
-    camera.viewfinder.position = Vector2(player.position.x, 300); // 300 centers vertically for floor bounds
-
-    // NOTE: HUD elements are now in camera.viewport, so they do NOT need manual position updates relative to camera.
+    camera.viewfinder.position = Vector2(player.position.x, 300);
 
     // Update Text Content
     distanceText.text = 'Distance: ${(player.position.x / 10).toInt()}m';
     xpLevelText.text = 'Lvl ${player.level}';
 
-    // Spawning Logic
-    _spawnTimer += dt;
-    if (_spawnTimer > 2.0) {
-      _spawnTimer = 0;
-      double spawnX = player.position.x + size.x + 100;
-      double spawnY = 200 + _rnd.nextDouble() * (size.y - 250);
+    // State Machine
+    if (gameState == GameState.running) {
+       // Check Boss Trigger: Every 1000 distance units
+       if (player.position.x > _lastBossTriggerX + 1000) {
+         gameState = GameState.bossWarning;
+         _bossWarningTimer = 3.0;
+         bossWarningText.opacity = 1;
+         // Flash effect
+         bossWarningText.add(
+           OpacityEffect.to(0, EffectController(duration: 0.5, alternate: true, infinite: true))
+         );
+       }
 
-      if (_rnd.nextDouble() < 0.6) {
-        world.add(Enemy(position: Vector2(spawnX, spawnY), hpScale: 1.0 + (player.level * 0.1)));
-      } else {
-        world.add(Rock(position: Vector2(spawnX, spawnY)));
-      }
+       // Normal Spawning
+       _spawnTimer += dt;
+       if (_spawnTimer > 2.0) {
+         _spawnTimer = 0;
+         double spawnX = player.position.x + 600; // spawn further ahead due to zoom
+         double spawnY = 200 + _rnd.nextDouble() * 250;
+
+         if (_rnd.nextDouble() < 0.6) {
+           world.add(Enemy(position: Vector2(spawnX, spawnY), hpScale: 1.0 + (player.level * 0.1)));
+         } else {
+           world.add(Rock(position: Vector2(spawnX, spawnY)));
+         }
+       }
+    } else if (gameState == GameState.bossWarning) {
+       _bossWarningTimer -= dt;
+       if (_bossWarningTimer <= 0) {
+         bossWarningText.opacity = 0;
+         bossWarningText.removeAll(bossWarningText.children); // remove effects
+         spawnBoss();
+       }
+    } else if (gameState == GameState.bossBattle) {
+       // Boss logic handled in BossEnemy class
+       // Ensure boss warning is off
+       bossWarningText.opacity = 0;
     }
 
     // Cleanup
-    // Iterate over a copy to avoid ConcurrentModificationError
     for (final child in world.children.toList()) {
        if (child is Enemy || child is Rock || child is LootBox) {
-          if ((child as PositionComponent).position.x < player.position.x - size.x) child.removeFromParent();
+          if ((child as PositionComponent).position.x < player.position.x - 600) { // Increased buffer
+             child.removeFromParent();
+          }
        }
     }
   }
@@ -191,25 +295,21 @@ class VanguardGame extends FlameGame with HasCollisionDetection, TapCallbacks {
 
 // ================= INVENTORY UI =================
 class InventoryDisplay extends PositionComponent with HasGameRef<VanguardGame> {
-  // 5x5 Grid + 1 Equipped Slot
   late RectangleComponent equippedSlot;
-  late TextComponent equippedLabel;
   final List<InventorySlot> gridSlots = [];
 
-  InventoryDisplay() : super(size: Vector2(350, 150)); // Container Size
+  InventoryDisplay() : super(size: Vector2(350, 150));
 
   @override
   Future<void> onLoad() async {
-    // 1. Equipped Slot (Left side)
     add(TextComponent(text: "EQUIPPED", position: Vector2(0, 0), textRenderer: TextPaint(style: const TextStyle(fontSize: 10, color: Colors.white))));
     equippedSlot = RectangleComponent(
       position: Vector2(0, 15),
       size: Vector2(40, 40),
-      paint: Paint()..color = const Color(0xFF444444), // Dark Gray
+      paint: Paint()..color = const Color(0xFF444444),
     );
     add(equippedSlot);
 
-    // 2. The 5x5 Grid (Right side)
     double startX = 60;
     double startY = 0;
     double boxSize = 25;
@@ -229,12 +329,10 @@ class InventoryDisplay extends PositionComponent with HasGameRef<VanguardGame> {
   }
 
   void updateInventoryVisuals() {
-    // Update Equipped
     final weapon = gameRef.player.currentWeapon;
     equippedSlot.children.whereType<RectangleComponent>().forEach((c) => c.removeFromParent());
     equippedSlot.add(_getWeaponIcon(weapon, Vector2(20, 20)));
 
-    // Update Grid
     final invList = gameRef.player.inventory.toList();
     for (int i = 0; i < gridSlots.length; i++) {
       gridSlots[i].clearIcon();
@@ -265,7 +363,6 @@ class InventorySlot extends RectangleComponent with TapCallbacks, HasGameRef<Van
 
   void setWeapon(WeaponType type) {
     storedWeapon = type;
-    // Add icon
     Paint p;
     switch(type) {
       case WeaponType.dagger: p = BasicPalette.yellow.paint(); break;
@@ -283,7 +380,6 @@ class InventorySlot extends RectangleComponent with TapCallbacks, HasGameRef<Van
   @override
   void onTapDown(TapDownEvent event) {
     if (storedWeapon != null) {
-      // Equip this weapon
       gameRef.player.equipWeapon(storedWeapon!);
     }
   }
@@ -294,35 +390,30 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
   final JoystickComponent joystick;
   final Vector2 floorBounds;
 
-  // Inventory
-  Set<WeaponType> inventory = { WeaponType.sword }; // Start with sword
+  Set<WeaponType> inventory = { WeaponType.sword };
   WeaponType currentWeapon = WeaponType.sword;
 
-  // Stats
   int level = 1;
   double currentXp = 0;
   double targetXp = 100;
   double maxHp = 100;
   late double currentHp;
 
-  // Combat Stats
   double damage = 20;
   double attackSpeed = 0.5;
   double range = 100;
   bool autoAttackEnabled = true;
 
-  // Visuals
   final double moveSpeed = 250;
   late RectangleComponent bodyVisual;
   late RectangleComponent stickWeapon;
   late CircleComponent swirlEffect;
 
-  // State
   bool isAttacking = false;
   bool isSwirling = false;
   double _swingTimer = 0;
   double _damageCooldown = 0;
-  final Set<Enemy> _hitTargets = {}; // Track enemies hit per swing
+  final Set<PositionComponent> _hitTargets = {};
   Vector2 facingDirection = Vector2(1, 0);
 
   Player(this.joystick, {required this.floorBounds})
@@ -335,7 +426,6 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
     if (!inventory.contains(newWeapon)) {
       inventory.add(newWeapon);
       gameRef.world.add(DamageText("Found ${newWeapon.name}!", position: position.clone()..y -= 80, color: const Color(0xFFFFD700)));
-      // Update UI
       gameRef.inventoryDisplay.updateInventoryVisuals();
     } else {
       gameRef.world.add(DamageText("Duplicate Discarded", position: position.clone()..y -= 80, color: Colors.grey));
@@ -377,11 +467,7 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
       targetXp *= 1.5;
       maxHp += 20;
       currentHp = maxHp;
-      gameRef.world.add(
-        LevelUpText(
-          position: position.clone()..y -= 80,
-        )
-      );
+      gameRef.world.add(LevelUpText(position: position.clone()..y -= 80));
     }
   }
 
@@ -395,7 +481,6 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
     add(stickWeapon);
     add(swirlEffect);
 
-    // Init UI
     Future.delayed(Duration.zero, () => gameRef.inventoryDisplay.updateInventoryVisuals());
   }
 
@@ -404,7 +489,6 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
     super.update(dt);
     if (_damageCooldown > 0) _damageCooldown -= dt;
 
-    // Move
     if (!joystick.delta.isZero()) {
       position.add(joystick.relativeDelta * moveSpeed * dt);
       if (joystick.relativeDelta.x > 0.1) facingDirection = Vector2(1, 0);
@@ -416,28 +500,26 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
     priority = position.y.toInt();
 
     // Loot Check
-    // Use safe iteration if modifying parent, but here we call pickup() which modifies parent (LootBox).
-    // So we should iterate over copy of children.
     for (final child in gameRef.world.children.toList()) {
       if (child is LootBox && child.toAbsoluteRect().overlaps(bodyVisual.toAbsoluteRect())) {
         child.pickup();
       }
     }
 
-    // Attack
+    // Attack Logic
     if (!isSwirling) {
       if (isAttacking) {
         _swingTimer += dt;
         double progress = _swingTimer / attackSpeed;
         stickWeapon.angle = -pi/4 + (sin(progress * pi) * pi/2);
 
-        // Hitbox check during active swing part
         if (progress > 0.2 && progress < 0.8) {
            for (final child in gameRef.world.children.toList()) {
-            if (child is Enemy) {
-              if (stickWeapon.toAbsoluteRect().overlaps(child.bodyVisual.toAbsoluteRect())) {
+            if (child is Enemy || child is BossEnemy) {
+              if (child is PositionComponent && stickWeapon.toAbsoluteRect().overlaps((child as dynamic).bodyVisual.toAbsoluteRect())) {
                  if (!_hitTargets.contains(child)) {
-                    child.takeDamage(damage);
+                    if (child is Enemy) child.takeDamage(damage);
+                    if (child is BossEnemy) child.takeDamage(damage);
                     _hitTargets.add(child);
                  }
               }
@@ -449,13 +531,19 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
           stickWeapon.opacity = 0;
         }
       } else if (autoAttackEnabled) {
-        // Auto Trigger
+        bool targetFound = false;
+        // Check regular enemies
         for (final child in gameRef.world.children) {
           if (child is Enemy && position.distanceTo(child.position) < range) {
-            startAttack();
-            break;
+            targetFound = true; break;
           }
         }
+        // Check boss
+        if (!targetFound && gameRef.currentBoss != null && position.distanceTo(gameRef.currentBoss!.position) < range) {
+           targetFound = true;
+        }
+
+        if (targetFound) startAttack();
       }
     } else {
       swirlEffect.angle += dt * 15;
@@ -470,8 +558,9 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
     swirlEffect.opacity = 1;
 
     for (final child in gameRef.world.children.toList()) {
-      if (child is Enemy && position.distanceTo(child.position) <= 200) {
-           child.takeDamage(100);
+      if ((child is Enemy || child is BossEnemy) && position.distanceTo((child as PositionComponent).position) <= 200) {
+           if (child is Enemy) child.takeDamage(100);
+           if (child is BossEnemy) child.takeDamage(100);
       }
     }
     Future.delayed(const Duration(milliseconds: 800), () {
@@ -481,7 +570,7 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
   }
 
   void takeDamage(double amount) {
-    if (_damageCooldown > 0) return;
+    if (_damageCooldown > 0 || gameRef.isGameOver) return;
     currentHp -= amount;
     _damageCooldown = 0.5;
     bodyVisual.paint = BasicPalette.red.paint();
@@ -491,25 +580,47 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
     if (currentHp <= 0) {
       gameRef.isGameOver = true;
       gameRef.camera.viewport.add(
-        TextComponent(
-          text: "GAME OVER",
-          textRenderer: TextPaint(style: const TextStyle(fontSize: 48, color: Colors.red, fontWeight: FontWeight.bold)),
-          position: gameRef.size / 2, // Center of viewport
+        HudButtonComponent(
+          button: TextComponent(
+            text: "GAME OVER - TAP TO RESTART",
+            textRenderer: TextPaint(style: const TextStyle(fontSize: 40, color: Colors.red, fontWeight: FontWeight.bold, backgroundColor: Colors.black)),
+            anchor: Anchor.center,
+          ),
+          position: gameRef.size / 2,
           anchor: Anchor.center,
+          onPressed: () {
+             // Basic Restart Logic: Reload app logic not available, just unpause?
+             // Ideally we restart the whole game instance.
+             // Given limitations, we will reset stats and resume.
+             gameRef.isGameOver = false;
+             gameRef.player.currentHp = gameRef.player.maxHp;
+             gameRef.player.position = Vector2(100, 300);
+             gameRef.gameState = GameState.running;
+
+             // Clear World Entities
+             for (final child in gameRef.world.children.toList()) {
+               if (child is Enemy || child is Rock || child is LootBox || child is DamageText) {
+                 child.removeFromParent();
+               }
+             }
+
+             // Remove Game Over Text (this button)
+             gameRef.camera.viewport.children.whereType<HudButtonComponent>().last.removeFromParent();
+          }
         )
       );
     }
   }
 }
 
-// ================= ENEMY =================
+// ================= ENEMIES =================
 class Enemy extends PositionComponent with HasGameRef<VanguardGame> {
   double maxHp = 40;
   late double currentHp;
   late RectangleComponent bodyVisual;
   late RectangleComponent weaponVisual;
   final double hpScale;
-  final double moveSpeed = 60;
+  double moveSpeed = 60;
   bool isAttacking = false;
   double _attackTimer = 0;
   double _damageCooldown = 0;
@@ -527,11 +638,9 @@ class Enemy extends PositionComponent with HasGameRef<VanguardGame> {
     bodyVisual = RectangleComponent(size: size, paint: BasicPalette.purple.paint());
     weaponVisual = RectangleComponent(size: Vector2(50, 8), paint: BasicPalette.red.paint(), anchor: Anchor.centerLeft, position: Vector2(size.x/2 - 10, size.y/2), angle: -pi/4)..opacity = 0;
 
-    // Health Bars
     add(RectangleComponent(position: Vector2(0, -10), size: Vector2(60, 6), paint: BasicPalette.red.paint()));
     hpBar = RectangleComponent(position: Vector2(0, -10), size: Vector2(60, 6), paint: BasicPalette.green.paint());
     add(hpBar);
-
     add(bodyVisual);
     add(weaponVisual);
   }
@@ -541,8 +650,6 @@ class Enemy extends PositionComponent with HasGameRef<VanguardGame> {
     super.update(dt);
     if (_damageCooldown > 0) _damageCooldown -= dt;
     priority = position.y.toInt();
-
-    // HP Bar Update
     hpBar.size.x = 60 * (currentHp / maxHp).clamp(0.0, 1.0);
 
     double dist = position.distanceTo(gameRef.player.position);
@@ -572,14 +679,130 @@ class Enemy extends PositionComponent with HasGameRef<VanguardGame> {
     gameRef.world.add(DamageText("-${amount.toInt()}", position: position.clone()..y -= 60));
 
     if (currentHp <= 0) {
-      gameRef.player.gainXp(35);
-      if (Random().nextDouble() < 0.25) gameRef.world.add(LootBox(position: position.clone()));
-      removeFromParent();
+      onDeath();
     }
+  }
+
+  void onDeath() {
+    gameRef.player.gainXp(35);
+    if (Random().nextDouble() < 0.25) gameRef.world.add(LootBox(position: position.clone()));
+    removeFromParent();
   }
 }
 
-// ================= LOOT =================
+class BossEnemy extends Enemy {
+  double dashTimer = 0;
+  bool isDashing = false;
+
+  BossEnemy({required super.position, required super.hpScale}) {
+    maxHp = 500 * hpScale;
+    currentHp = maxHp;
+    size = Vector2(120, 120);
+    moveSpeed = 40; // Slow normal move
+  }
+
+  @override
+  Future<void> onLoad() async {
+    // Red Square Visual
+    bodyVisual = RectangleComponent(size: size, paint: BasicPalette.red.paint());
+    weaponVisual = RectangleComponent(size: Vector2(100, 15), paint: BasicPalette.darkRed.paint(), anchor: Anchor.centerLeft, position: Vector2(size.x/2, size.y/2), angle: -pi/4)..opacity = 0;
+
+    add(bodyVisual);
+    add(weaponVisual);
+    // Note: No HP bar above head, using BossHealthBar in HUD
+  }
+
+  @override
+  void update(double dt) {
+    // Manually update children to ensure animations play (since we don't call super.update due to hpBar issues)
+    for (final child in children) {
+      child.update(dt);
+    }
+
+    if (_damageCooldown > 0) _damageCooldown -= dt;
+    priority = position.y.toInt();
+
+    final player = gameRef.player;
+    double dist = position.distanceTo(player.position);
+
+    dashTimer += dt;
+
+    if (isDashing) {
+       // Dash Logic
+       Vector2 dir = (player.position - position).normalized();
+       position.add(dir * 300 * dt); // High speed
+       if (dashTimer > 5.5) { // Dash for 0.5s
+         isDashing = false;
+         dashTimer = 0;
+         moveSpeed = 40;
+       }
+       // Collision during dash
+       if (toAbsoluteRect().overlaps(player.bodyVisual.toAbsoluteRect())) {
+         player.takeDamage(20);
+       }
+    } else {
+       // Normal AI
+       if (dashTimer > 5.0) {
+         isDashing = true;
+         // Telegraph?
+         gameRef.world.add(DamageText("DASH!", position: position.clone()..y-=50, color: Colors.red));
+       }
+
+       if (dist > 100) {
+         Vector2 dir = (player.position - position).normalized();
+         position.add(dir * moveSpeed * dt);
+       } else {
+         // Melee Attack
+         _attackTimer += dt * 5;
+         weaponVisual.opacity = 1;
+         weaponVisual.angle = -pi/4 + (sin(_attackTimer) * pi/2);
+         if (weaponVisual.toAbsoluteRect().overlaps(player.bodyVisual.toAbsoluteRect())) {
+            player.takeDamage(10);
+         }
+       }
+    }
+  }
+
+  @override
+  void onDeath() {
+    // Drop 3 Loot Boxes
+    for(int i=0; i<3; i++) {
+      gameRef.world.add(LootBox(position: position + Vector2(i*40.0, 0)));
+    }
+    gameRef.player.gainXp(500);
+    gameRef.onBossDefeated();
+    removeFromParent();
+  }
+}
+
+// ================= HUD COMPONENTS =================
+class BossHealthBar extends PositionComponent {
+  final VanguardGame game;
+  final Paint _barBack = Paint()..color = Colors.grey;
+  final Paint _barFore = Paint()..color = Colors.red;
+
+  BossHealthBar({required this.game}) : super(size: Vector2(400, 25));
+
+  @override
+  void render(Canvas canvas) {
+    if (game.currentBoss == null) return;
+
+    // Draw Border/Back
+    canvas.drawRect(size.toRect(), _barBack);
+
+    double pct = (game.currentBoss!.currentHp / game.currentBoss!.maxHp).clamp(0.0, 1.0);
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.x * pct, size.y), _barFore);
+
+    // Text label
+    const textStyle = TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold);
+    const textSpan = TextSpan(text: "BOSS HP", style: textStyle);
+    final textPainter = TextPainter(text: textSpan, textDirection: TextDirection.ltr);
+    textPainter.layout();
+    textPainter.paint(canvas, Offset(size.x/2 - textPainter.width/2, size.y/2 - textPainter.height/2));
+  }
+}
+
+// ================= LOOT & HELPERS =================
 class LootBox extends PositionComponent with HasGameRef<VanguardGame> {
   LootBox({required Vector2 position}) : super(position: position, size: Vector2(30, 30), anchor: Anchor.center);
   @override
@@ -594,7 +817,6 @@ class LootBox extends PositionComponent with HasGameRef<VanguardGame> {
   }
 }
 
-// ================= HELPERS =================
 class Rock extends PositionComponent {
   Rock({required Vector2 position}) : super(position: position, size: Vector2(50, 30), anchor: Anchor.bottomCenter);
   @override
@@ -623,14 +845,7 @@ class LevelUpText extends TextComponent {
           text: "LEVEL UP!",
           position: position,
           textRenderer: TextPaint(
-            style: const TextStyle(
-              color: Colors.yellow,
-              fontSize: 32,
-              fontWeight: FontWeight.bold,
-              shadows: [
-                Shadow(offset: Offset(2, 2), color: Colors.black, blurRadius: 2),
-              ],
-            ),
+            style: const TextStyle(color: Colors.yellow, fontSize: 32, fontWeight: FontWeight.bold, shadows: [Shadow(offset: Offset(2, 2), color: Colors.black, blurRadius: 2)]),
           ),
           anchor: Anchor.center,
         );
@@ -650,28 +865,10 @@ class PlayerHealthBar extends PositionComponent {
   PlayerHealthBar({required this.player}) : super(size: Vector2(150, 15));
 
   @override
-  void update(double dt) {
-    super.update(dt);
-    // Keep fixed on screen relative to camera is handled by parenting or manual update.
-    // Here we act as a HUD element added to game, so we need to move with camera.
-    // For simplicity, let's attach to the Stats area.
-    position = Vector2(20, 70);
-  }
-
-  @override
   void render(Canvas canvas) {
     canvas.drawRect(size.toRect(), _barBackPaint);
-    double hpPercent = 0;
-    if (player.maxHp > 0) {
-      hpPercent = player.currentHp / player.maxHp;
-    }
-    if (hpPercent < 0) hpPercent = 0;
-    if (hpPercent > 1) hpPercent = 1;
-
-    canvas.drawRect(
-      Rect.fromLTWH(0, 0, size.x * hpPercent, size.y),
-      _barForePaint
-    );
+    double hpPercent = (player.currentHp / player.maxHp).clamp(0.0, 1.0);
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.x * hpPercent, size.y), _barForePaint);
   }
 }
 
@@ -683,21 +880,9 @@ class XpBarComponent extends PositionComponent {
   XpBarComponent({required this.player}) : super(size: Vector2(150, 10));
 
   @override
-  void update(double dt) {
-    super.update(dt);
-    position = Vector2(20, 90);
-  }
-
-  @override
   void render(Canvas canvas) {
     canvas.drawRect(size.toRect(), _barBackPaint);
-    double xpPercent = 0;
-    if (player.targetXp > 0) xpPercent = player.currentXp / player.targetXp;
-    if (xpPercent > 1) xpPercent = 1;
-
-    canvas.drawRect(
-      Rect.fromLTWH(0, 0, size.x * xpPercent, size.y),
-      _barForePaint
-    );
+    double xpPercent = (player.currentXp / player.targetXp).clamp(0.0, 1.0);
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.x * xpPercent, size.y), _barForePaint);
   }
 }
