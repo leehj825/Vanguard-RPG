@@ -212,6 +212,9 @@ class VanguardGame extends FlameGame with TapCallbacks {
   late final JoystickComponent joystick;
   late InventoryDisplay inventoryDisplay;
 
+  double nextSpawnX = 500;
+  final Random rng = Random();
+
   @override
   Future<void> onLoad() async {
     camera.viewfinder.anchor = Anchor.center;
@@ -230,7 +233,7 @@ class VanguardGame extends FlameGame with TapCallbacks {
     camera.viewport.add(joystick);
     camera.viewport.add(inventoryDisplay);
 
-    world.add(Rock(position: Vector2(400, 400)));
+    // Initial spawn removed, handled by update loop
   }
 
   @override
@@ -250,6 +253,17 @@ class VanguardGame extends FlameGame with TapCallbacks {
   void update(double dt) {
     super.update(dt);
     camera.viewfinder.position = Vector2(player.position.x, 300);
+
+    // Endless spawning
+    final screenRight = camera.viewfinder.position.x + (size.x / 2 / camera.viewfinder.zoom);
+    if (screenRight + 200 > nextSpawnX) {
+      if (rng.nextBool()) {
+        world.add(Rock(position: Vector2(nextSpawnX, 300 + rng.nextDouble() * 300)));
+      } else {
+        world.add(Enemy(position: Vector2(nextSpawnX, 300 + rng.nextDouble() * 300)));
+      }
+      nextSpawnX += 300 + rng.nextDouble() * 400;
+    }
   }
 }
 
@@ -300,6 +314,44 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
     for(final c in gameRef.world.children) {
       if (c is LootBox && c.toAbsoluteRect().overlaps(bodyHitbox.toAbsoluteRect())) c.pickup();
     }
+  }
+}
+
+class Enemy extends PositionComponent with HasGameRef<VanguardGame> {
+  late StickmanAnimator animator;
+  late RectangleComponent bodyHitbox;
+
+  Enemy({required Vector2 position}) : super(position: position, size: Vector2(60, 90), anchor: Anchor.bottomCenter) {
+    animator = StickmanAnimator(color: Colors.red, weaponType: WeaponType.none);
+  }
+
+  @override
+  Future<void> onLoad() async {
+    bodyHitbox = RectangleComponent(size: size, paint: Paint()..color = Colors.transparent);
+    add(bodyHitbox);
+  }
+
+  @override
+  void render(Canvas canvas) {
+    animator.render(canvas, Vector2(size.x/2, size.y), size.y);
+    super.render(canvas);
+  }
+
+  @override
+  void update(double dt) {
+    super.update(dt);
+    final player = gameRef.player;
+    final direction = (player.position - position).normalized();
+
+    // Simple tracking
+    if (position.distanceTo(player.position) < 400 && position.distanceTo(player.position) > 40) {
+      position.add(direction * 100 * dt);
+      animator.update(dt, direction * 100);
+    } else {
+       animator.update(dt, Vector2.zero());
+    }
+
+    priority = position.y.toInt();
   }
 }
 
