@@ -124,7 +124,10 @@ class StickmanAnimator {
   double _facingDirection = 1.0;
   double _runTime = 0.0;
   double _attackTime = 0.0;
-  final double _attackDuration = 0.15; // Quicker swing
+  final double _attackDuration = 0.15; // Fast swing
+
+  // Cache for hitbox calculation
+  Offset lastWeaponTip = Offset.zero;
 
   StickmanAnimator({
     required this.color,
@@ -166,6 +169,7 @@ class StickmanAnimator {
         skeleton.rHand.x = _basePose.rHand.x + legSwing;
       }
     } else {
+       // Reset Logic
        skeleton.lKnee.x = _basePose.lKnee.x; skeleton.lFoot.x = _basePose.lFoot.x; skeleton.lFoot.y = _basePose.lFoot.y;
        skeleton.rKnee.x = _basePose.rKnee.x; skeleton.rFoot.x = _basePose.rFoot.x; skeleton.rFoot.y = _basePose.rFoot.y;
        skeleton.lElbow.x = _basePose.lElbow.x; skeleton.lHand.x = _basePose.lHand.x;
@@ -174,27 +178,31 @@ class StickmanAnimator {
        }
     }
 
-    // --- SWING ATTACK ANIMATION ---
+    // --- CIRCULAR SWING ATTACK ---
     if (_attackTime > 0) {
        _attackTime -= dt;
-       // Progress 0.0 (Start) to 1.0 (End)
        double progress = 1.0 - (_attackTime / _attackDuration);
 
-       // Swing Logic:
-       // Start Angle: -pi/2 (Up)
-       // End Angle: 0 (Front)
-       double swingAngle = -pi/2 + (progress * pi);
+       // Arc: Starts Up (-pi/2), ends Front (0) or slightly down (pi/4)
+       double startAngle = -pi * 0.8; // Almost fully up/back
+       double endAngle = pi * 0.2;    // Slightly down/forward
+       double currentAngle = startAngle + (endAngle - startAngle) * progress;
 
-       // Hand follows arc around shoulder (approx relative to neck)
-       double armLength = 25.0;
+       double armLength = 25.0; // Forearm length
 
-       // Elbow is half-way
-       skeleton.rElbow.x = _basePose.neck.x + cos(swingAngle) * (armLength * 0.5);
-       skeleton.rElbow.y = _basePose.neck.y + sin(swingAngle) * (armLength * 0.5);
+       // Elbow stays roughly at shoulder, maybe moves slightly
+       // We pivot around the Neck/Shoulder area
+       // Calculate Hand Position based on angle
+       double cx = _basePose.neck.x;
+       double cy = _basePose.neck.y;
 
-       // Hand is full-way
-       skeleton.rHand.x = _basePose.neck.x + cos(swingAngle) * armLength;
-       skeleton.rHand.y = _basePose.neck.y + sin(swingAngle) * armLength;
+       // Elbow is half-way along the arc
+       skeleton.rElbow.x = cx + cos(currentAngle) * (armLength * 0.5);
+       skeleton.rElbow.y = cy + sin(currentAngle) * (armLength * 0.5);
+
+       // Hand is at the end
+       skeleton.rHand.x = cx + cos(currentAngle) * armLength;
+       skeleton.rHand.y = cy + sin(currentAngle) * armLength;
     }
   }
 
@@ -221,11 +229,25 @@ class StickmanAnimator {
     }
     drawNode(skeleton.root, toScreen(skeleton.root.position));
 
+    // WEAPON DRAWING (Rotational)
     if (weaponType != WeaponType.none) {
       final rHandPos = toScreen(skeleton.rHand);
-      // Weapon follows hand angle roughly
-      canvas.drawLine(rHandPos, rHandPos + const Offset(25, -5), Paint()..color=Colors.white..strokeWidth=2);
+      final rElbowPos = toScreen(skeleton.rElbow);
+
+      // Calculate angle from Elbow to Hand to determine sword direction
+      final armDir = (rHandPos - rElbowPos);
+      final angle = atan2(armDir.dy, armDir.dx);
+
+      final swordLen = 35.0;
+      final tipPos = rHandPos + Offset(cos(angle) * swordLen, sin(angle) * swordLen);
+
+      // Store tip for Hitbox calculations (converted to world space roughly later)
+      // Note: This 'lastWeaponTip' is in local space relative to the stickman center
+      lastWeaponTip = tipPos;
+
+      canvas.drawLine(rHandPos, tipPos, Paint()..color=Colors.white..strokeWidth=2);
     }
+
     canvas.restore();
   }
 }
@@ -241,7 +263,6 @@ class VanguardGame extends FlameGame with TapCallbacks {
   double nextBossDistance = 1000;
   bool isBossSequenceActive = false;
 
-  // Spawning
   double _spawnTimer = 0;
   final Random rng = Random();
 
@@ -264,8 +285,8 @@ class VanguardGame extends FlameGame with TapCallbacks {
 
     camera.viewport.add(joystick);
     camera.viewport.add(inventoryDisplay);
-    camera.viewport.add(bossWarning); // Hidden by default
-    camera.viewport.add(bossHealthBar); // Hidden by default
+    camera.viewport.add(bossWarning);
+    camera.viewport.add(bossHealthBar);
   }
 
   @override
@@ -284,7 +305,7 @@ class VanguardGame extends FlameGame with TapCallbacks {
     camera.viewfinder.zoom = isPortrait ? size.x / 450 : size.y / 800;
     if (isLoaded) {
       joystick.position = Vector2(60, size.y - 60);
-      inventoryDisplay.position = Vector2(size.x / 2 - 175, 20); // Center the new 2x5 grid
+      inventoryDisplay.position = Vector2(size.x / 2 - 175, 20);
       bossWarning.position = size / 2;
       bossHealthBar.position = Vector2(size.x / 2 - 200, 80);
     }
@@ -295,15 +316,12 @@ class VanguardGame extends FlameGame with TapCallbacks {
     super.update(dt);
     camera.viewfinder.position = Vector2(player.position.x, 300);
 
-    // Update Distance
     if (player.position.x > distanceTraveled) distanceTraveled = player.position.x;
 
-    // --- BOSS TRIGGER LOGIC ---
     if (!isBossSequenceActive && distanceTraveled > nextBossDistance) {
       startBossSequence();
     }
 
-    // --- NORMAL SPAWNING LOGIC ---
     if (!isBossSequenceActive) {
       _spawnTimer += dt;
       if (_spawnTimer > 2.0) {
@@ -319,7 +337,6 @@ class VanguardGame extends FlameGame with TapCallbacks {
       }
     }
 
-    // Cleanup
     for (final child in world.children) {
       if (child is PositionComponent && child.position.x < player.position.x - 600) {
         child.removeFromParent();
@@ -347,9 +364,12 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
   final Vector2 floorBounds;
   late StickmanAnimator animator;
   late RectangleComponent bodyHitbox;
-  int health = 100;
 
-  List<WeaponType> inventory = [WeaponType.sword]; // List for index access
+  // Health
+  double maxHp = 100;
+  double currentHp = 100;
+
+  List<WeaponType> inventory = [WeaponType.sword];
   WeaponType currentWeapon = WeaponType.sword;
 
   Player(this.joystick, {required this.floorBounds}) : super(size: Vector2(60, 90), anchor: Anchor.bottomCenter) {
@@ -371,18 +391,35 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
 
   void attack() {
     animator.triggerAttack();
+
+    // HITBOX LOGIC: Precise Tip Calculation
+    // We need to convert the local tip position to world position
+    // Facing direction matters
+    double dir = animator._facingDirection;
+    Offset tipLocal = animator.lastWeaponTip;
+
+    // Convert local Offset (relative to anchor) to World Vector2
+    // Local tip X needs to be flipped if facing left
+    Vector2 tipWorld = position + Vector2(tipLocal.dx * dir, tipLocal.dy);
+
     for (final c in gameRef.world.children) {
-      if (c is Enemy && c.distance(this) < 100) {
-        c.takeDamage(20);
+      if (c is Enemy) {
+        // Check distance from Sword Tip to Enemy Center
+        if (tipWorld.distanceTo(c.position + Vector2(0, -45)) < 40) {
+           c.takeDamage(20);
+        }
       }
     }
   }
 
   void takeDamage(int amount) {
-    health -= amount;
+    currentHp -= amount;
     animator.color = Colors.white;
     Future.delayed(const Duration(milliseconds: 100), () => animator.color = Colors.green);
-    if (health <= 0) removeFromParent();
+    if (currentHp <= 0) {
+       // Game Over
+       removeFromParent();
+    }
   }
 
   @override
@@ -418,6 +455,7 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
 class Enemy extends PositionComponent with HasGameRef<VanguardGame> {
   late StickmanAnimator animator;
   int health = 30;
+  double _attackCooldown = 0.0;
 
   Enemy({required Vector2 position}) : super(position: position, size: Vector2(60, 90), anchor: Anchor.bottomCenter) {
     animator = StickmanAnimator(color: Colors.red, weaponType: WeaponType.none);
@@ -428,7 +466,7 @@ class Enemy extends PositionComponent with HasGameRef<VanguardGame> {
     animator.color = Colors.white;
     Future.delayed(const Duration(milliseconds: 100), () => animator.color = (this is Boss) ? Colors.purple : Colors.red);
     if (health <= 0) {
-      if (Random().nextDouble() < 0.3) gameRef.world.add(LootBox(position: position));
+      if (Random().nextDouble() < 0.5) gameRef.world.add(LootBox(position: position)); // Increased Drop Rate
       removeFromParent();
       if (this is Boss) gameRef.onBossDefeated();
     }
@@ -447,13 +485,32 @@ class Enemy extends PositionComponent with HasGameRef<VanguardGame> {
     if (player.parent == null) return;
 
     double dist = position.distanceTo(player.position);
-    if (dist < 400 && dist > 40) {
+
+    if (dist < 400 && dist > 50) {
       Vector2 dir = (player.position - position).normalized();
-      position.add(dir * 100 * dt);
-      animator.update(dt, dir * 100);
+      position.add(dir * 80 * dt);
+      animator.update(dt, dir * 80);
+    } else if (dist <= 50) {
+      animator.update(dt, Vector2.zero());
+      if (_attackCooldown <= 0) {
+        animator.triggerAttack(); // Swing animation
+
+        // HITBOX LOGIC for Enemy
+        double dir = animator._facingDirection;
+        Offset tipLocal = animator.lastWeaponTip;
+        Vector2 tipWorld = position + Vector2(tipLocal.dx * dir, tipLocal.dy);
+
+        // Check Tip vs Player Body
+        if (tipWorld.distanceTo(player.position + Vector2(0, -45)) < 30) {
+          player.takeDamage(5);
+        }
+        _attackCooldown = 1.5;
+      }
     } else {
       animator.update(dt, Vector2.zero());
     }
+
+    if (_attackCooldown > 0) _attackCooldown -= dt;
     priority = position.y.toInt();
   }
 }
@@ -469,20 +526,17 @@ class Boss extends Enemy {
 // ================= UI & COMPONENTS =================
 
 class InventoryDisplay extends PositionComponent with HasGameRef<VanguardGame> {
-  // 2 rows, 5 columns
   final List<InventorySlot> slots = [];
 
-  InventoryDisplay() : super(size: Vector2(350, 100)); // Adjusted size for 2x5
+  InventoryDisplay() : super(size: Vector2(350, 100));
 
   @override
   Future<void> onLoad() async {
-    // Background
     add(RectangleComponent(size: size, paint: BasicPalette.black.withAlpha(150).paint()));
 
-    // Grid Setup
     double startX = 10;
     double startY = 10;
-    double slotSize = 40; // 40x40 slots
+    double slotSize = 40;
     double gap = 10;
 
     for (int row = 0; row < 2; row++) {
@@ -521,18 +575,13 @@ class InventorySlot extends PositionComponent with TapCallbacks, HasGameRef<Vang
 
   void setWeapon(WeaponType w) {
     weapon = w;
-    // Simple color code for weapon icon
     Color c = Colors.white;
     if (w == WeaponType.sword) c = Colors.blue;
     if (w == WeaponType.axe) c = Colors.red;
     if (w == WeaponType.dagger) c = Colors.yellow;
 
-    // Clear old icon
     children.whereType<RectangleComponent>().where((c) => c.paint.style == PaintingStyle.fill).forEach((c) => c.removeFromParent());
-
-    // Add new icon
     add(RectangleComponent(size: size * 0.8, position: size * 0.1, paint: Paint()..color = c));
-
     updateHighlight();
   }
 
@@ -543,9 +592,7 @@ class InventorySlot extends PositionComponent with TapCallbacks, HasGameRef<Vang
   }
 
   void updateHighlight() {
-    // Remove existing highlight
     children.whereType<RectangleComponent>().where((c) => c.priority == 10).forEach((c) => c.removeFromParent());
-
     if (weapon != null && gameRef.player.currentWeapon == weapon) {
       add(RectangleComponent(
         size: size,
@@ -559,6 +606,7 @@ class InventorySlot extends PositionComponent with TapCallbacks, HasGameRef<Vang
   void onTapDown(TapDownEvent event) {
     if (weapon != null) {
       gameRef.player.equipWeapon(weapon!);
+      gameRef.inventoryDisplay.refresh();
     }
   }
 }
@@ -571,7 +619,7 @@ class BossWarningText extends TextComponent with HasGameRef<VanguardGame> {
     text: "WARNING: BOSS APPROACHING",
     anchor: Anchor.center,
     textRenderer: TextPaint(style: const TextStyle(color: Colors.transparent, fontSize: 40, fontWeight: FontWeight.bold)),
-  ); // Hidden by default
+  );
 
   void show() {
     _visible = true;
@@ -583,17 +631,12 @@ class BossWarningText extends TextComponent with HasGameRef<VanguardGame> {
     if (!_visible) return;
     super.update(dt);
     _timer -= dt;
-
-    // Blink
     textRenderer = TextPaint(style: TextStyle(
       color: (sin(_timer * 15) > 0) ? Colors.red : Colors.transparent,
-      fontSize: 40,
-      fontWeight: FontWeight.bold
+      fontSize: 40, fontWeight: FontWeight.bold
     ));
-
     if (_timer <= 0) {
       _visible = false;
-      // Ensure hidden
       textRenderer = TextPaint(style: const TextStyle(color: Colors.transparent, fontSize: 40, fontWeight: FontWeight.bold));
       gameRef.spawnBoss();
     }
@@ -602,12 +645,10 @@ class BossWarningText extends TextComponent with HasGameRef<VanguardGame> {
 
 class BossHealthBar extends PositionComponent with HasGameRef<VanguardGame> {
   BossHealthBar() : super(size: Vector2(400, 25), anchor: Anchor.topCenter);
-
   @override
   void render(Canvas c) {
     final boss = gameRef.world.children.whereType<Boss>().firstOrNull;
     if (boss == null) return;
-
     c.drawRect(size.toRect(), Paint()..color = Colors.grey);
     double pct = (boss.health / 200).clamp(0.0, 1.0);
     c.drawRect(Rect.fromLTWH(0, 0, size.x * pct, size.y), Paint()..color = Colors.red);
@@ -621,8 +662,13 @@ class LootBox extends PositionComponent with HasGameRef<VanguardGame> {
     add(RectangleComponent(size: size, paint: Paint()..color = const Color(0xFFFFD700)));
     add(MoveEffect.by(Vector2(0,-10), EffectController(duration: 1, alternate: true, infinite: true)));
   }
+  @override
+  void update(double dt) {
+    super.update(dt);
+    priority = position.y.toInt(); // Z-Sorting fix
+  }
   void pickup() {
-    gameRef.player.collectLoot(WeaponType.axe); // Randomize later
+    gameRef.player.collectLoot(WeaponType.values[Random().nextInt(4)+1]); // Random weapon
     removeFromParent();
   }
 }
