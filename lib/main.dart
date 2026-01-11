@@ -532,11 +532,27 @@ class InventorySlot extends PositionComponent with TapCallbacks, HasGameRef<Vang
 
     // Add new icon
     add(RectangleComponent(size: size * 0.8, position: size * 0.1, paint: Paint()..color = c));
+
+    updateHighlight();
   }
 
   void clear() {
     weapon = null;
     children.whereType<RectangleComponent>().where((c) => c.paint.style == PaintingStyle.fill).forEach((c) => c.removeFromParent());
+    updateHighlight();
+  }
+
+  void updateHighlight() {
+    // Remove existing highlight
+    children.whereType<RectangleComponent>().where((c) => c.priority == 10).forEach((c) => c.removeFromParent());
+
+    if (weapon != null && gameRef.player.currentWeapon == weapon) {
+      add(RectangleComponent(
+        size: size,
+        paint: Paint()..color = Colors.green..style = PaintingStyle.stroke..strokeWidth = 3,
+        priority: 10
+      ));
+    }
   }
 
   @override
@@ -554,11 +570,10 @@ class BossWarningText extends TextComponent with HasGameRef<VanguardGame> {
   BossWarningText() : super(
     text: "WARNING: BOSS APPROACHING",
     anchor: Anchor.center,
-    textRenderer: TextPaint(style: const TextStyle(color: Colors.red, fontSize: 40, fontWeight: FontWeight.bold)),
-  ) { opacity = 0; } // Hidden by default
+    textRenderer: TextPaint(style: const TextStyle(color: Colors.transparent, fontSize: 40, fontWeight: FontWeight.bold)),
+  ); // Hidden by default
 
   void show() {
-    opacity = 1;
     _visible = true;
     _timer = 3.0;
   }
@@ -578,7 +593,8 @@ class BossWarningText extends TextComponent with HasGameRef<VanguardGame> {
 
     if (_timer <= 0) {
       _visible = false;
-      opacity = 0;
+      // Ensure hidden
+      textRenderer = TextPaint(style: const TextStyle(color: Colors.transparent, fontSize: 40, fontWeight: FontWeight.bold));
       gameRef.spawnBoss();
     }
   }
