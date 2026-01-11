@@ -144,9 +144,9 @@ class StickmanAnimator {
   final double scale;
   WeaponType weaponType;
   StickmanSkeleton skeleton;
-  final StickmanSkeleton _basePose; // Store base pose for animation reference
+  final StickmanSkeleton _basePose;
 
-  double _facingAngle = 0.0;
+  double _facingDirection = 1.0; // 1 for Right, -1 for Left
   double _runTime = 0.0;
   double _attackTime = 0.0;
 
@@ -163,36 +163,40 @@ class StickmanAnimator {
   }
 
   void update(double dt, Vector2 velocity) {
-    // 1. Handle Rotation
-    if (velocity.length > 10) {
-      double targetAngle = velocity.x > 0 ? pi / 2 : -pi / 2;
-      double diff = targetAngle - _facingAngle;
-      if (diff.abs() > pi) diff -= 2 * pi * diff.sign;
-      _facingAngle += diff * dt * 10;
-
-      _runTime += dt * 10;
-    } else {
-      // Reset run cycle to standing if stopped, but smoothly?
-      // For simplicity, just snap or let it float.
-      _runTime = 0;
+    // 1. Handle Direction (Flip Scale)
+    if (velocity.x.abs() > 0.1) {
+      _facingDirection = velocity.x.sign;
     }
 
-    // 2. Handle Running Animation (Sine waves)
-    // We apply offsets to the base pose
-    double legSwing = sin(_runTime) * 10;
+    // 2. Handle Running Animation
+    if (velocity.length > 10) {
+      _runTime += dt * 10;
 
-    // Left Leg
-    skeleton.lKnee.z = _basePose.lKnee.z + legSwing;
-    skeleton.lFoot.z = _basePose.lFoot.z + legSwing;
+      double legSwing = sin(_runTime) * 8;
+      double kneeLift = max(0, sin(_runTime)) * 5;
 
-    // Right Leg (opposite phase)
-    skeleton.rKnee.z = _basePose.rKnee.z - legSwing;
-    skeleton.rFoot.z = _basePose.rFoot.z - legSwing;
+      // Left Leg
+      skeleton.lKnee.x = _basePose.lKnee.x + legSwing;
+      skeleton.lFoot.x = _basePose.lFoot.x + legSwing * 1.5;
+      skeleton.lFoot.y = _basePose.lFoot.y - kneeLift;
 
-    // Arms (swing opposite to legs)
-    skeleton.lElbow.z = _basePose.lElbow.z - legSwing;
-    skeleton.lHand.z = _basePose.lHand.z - legSwing;
+      // Right Leg (opposite phase)
+      double rLegSwing = sin(_runTime + pi) * 8;
+      double rKneeLift = max(0, sin(_runTime + pi)) * 5;
+      skeleton.rKnee.x = _basePose.rKnee.x + rLegSwing;
+      skeleton.rFoot.x = _basePose.rFoot.x + rLegSwing * 1.5;
+      skeleton.rFoot.y = _basePose.rFoot.y - rKneeLift;
 
+      // Arms (swing opposite to legs)
+      skeleton.lElbow.x = _basePose.lElbow.x - legSwing;
+      skeleton.lHand.x = _basePose.lHand.x - legSwing;
+
+    } else {
+      _runTime = 0;
+      // Reset logic could be added here to return to base pose
+    }
+
+    // 3. Handle Attack Animation
     if (_attackTime > 0) {
        _attackTime -= dt;
        // Attack Animation: Thrust Right Arm
@@ -201,23 +205,34 @@ class StickmanAnimator {
 
        skeleton.rElbow.x = _basePose.rElbow.x + thrust;
        skeleton.rHand.x = _basePose.rHand.x + thrust * 1.5;
-
-       // Also rotate torso slightly? Maybe later.
-    } else {
-       // Normal arm swing if not attacking
-       skeleton.rElbow.z = _basePose.rElbow.z + legSwing;
-       skeleton.rHand.z = _basePose.rHand.z + legSwing;
-
-       // Reset X positions
+    } else if (velocity.length <= 10) {
+       // Reset limbs if standing still and not attacking
        skeleton.rElbow.x = _basePose.rElbow.x;
        skeleton.rHand.x = _basePose.rHand.x;
+       skeleton.lElbow.x = _basePose.lElbow.x;
+       skeleton.lHand.x = _basePose.lHand.x;
+
+       skeleton.lKnee.x = _basePose.lKnee.x;
+       skeleton.lFoot.x = _basePose.lFoot.x;
+       skeleton.lFoot.y = _basePose.lFoot.y;
+
+       skeleton.rKnee.x = _basePose.rKnee.x;
+       skeleton.rFoot.x = _basePose.rFoot.x;
+       skeleton.rFoot.y = _basePose.rFoot.y;
+    } else {
+       // Running arms logic applies (handled in run block above for X swing)
+       // But we need to ensure Y/Z reset or consistent state if we modified them previously
+       double legSwing = sin(_runTime) * 8;
+       skeleton.rElbow.x = _basePose.rElbow.x + legSwing;
+       skeleton.rHand.x = _basePose.rHand.x + legSwing;
     }
   }
 
   void render(Canvas canvas, Vector2 position, double height) {
     canvas.save();
     canvas.translate(position.x, position.y);
-    canvas.scale(scale);
+    // Flip horizontal based on direction
+    canvas.scale(scale * _facingDirection, scale);
 
     final Paint paint = Paint()
       ..color = color
@@ -227,12 +242,9 @@ class StickmanAnimator {
 
     final Paint fillPaint = Paint()..color = color..style = PaintingStyle.fill;
 
+    // Simple 2D projection (Z ignored as visual depth)
     Offset toScreen(v.Vector3 p) {
-      double c = cos(_facingAngle);
-      double s = sin(_facingAngle);
-      double rx = p.x * c + p.z * s;
-      double rz = -p.x * s + p.z * c;
-      return Offset(rx, p.y + (rz * 0.3));
+      return Offset(p.x, p.y);
     }
 
     void drawNode(StickmanNode node, Offset parentPos) {
@@ -252,7 +264,7 @@ class StickmanAnimator {
 
     if (weaponType != WeaponType.none) {
       final rHandPos = toScreen(skeleton.rHand);
-      canvas.drawLine(rHandPos, rHandPos + Offset(20 * cos(_facingAngle), -20), Paint()..color=Colors.white..strokeWidth=2);
+      canvas.drawLine(rHandPos, rHandPos + const Offset(20, -20), Paint()..color=Colors.white..strokeWidth=2);
     }
 
     canvas.restore();
@@ -367,7 +379,10 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
 
   void takeDamage(int amount) {
     health -= amount;
-    // Visual flash could go here
+    // Visual flash
+    animator.color = Colors.white;
+    Future.delayed(const Duration(milliseconds: 100), () => animator.color = Colors.green);
+
     if (health <= 0) {
       // Game Over logic (reset or stop)
       removeFromParent(); // Simple death
