@@ -144,21 +144,73 @@ class StickmanAnimator {
   final double scale;
   WeaponType weaponType;
   StickmanSkeleton skeleton;
+  final StickmanSkeleton _basePose; // Store base pose for animation reference
 
   double _facingAngle = 0.0;
+  double _runTime = 0.0;
+  double _attackTime = 0.0;
 
   StickmanAnimator({
     required this.color,
     this.scale = 1.0,
     this.weaponType = WeaponType.none,
-  }) : skeleton = lStandPose.clone();
+  }) : skeleton = lStandPose.clone(), _basePose = lStandPose.clone();
+
+  void triggerAttack() {
+    if (_attackTime <= 0) {
+      _attackTime = 0.3; // Attack duration
+    }
+  }
 
   void update(double dt, Vector2 velocity) {
+    // 1. Handle Rotation
     if (velocity.length > 10) {
       double targetAngle = velocity.x > 0 ? pi / 2 : -pi / 2;
       double diff = targetAngle - _facingAngle;
       if (diff.abs() > pi) diff -= 2 * pi * diff.sign;
       _facingAngle += diff * dt * 10;
+
+      _runTime += dt * 10;
+    } else {
+      // Reset run cycle to standing if stopped, but smoothly?
+      // For simplicity, just snap or let it float.
+      _runTime = 0;
+    }
+
+    // 2. Handle Running Animation (Sine waves)
+    // We apply offsets to the base pose
+    double legSwing = sin(_runTime) * 10;
+
+    // Left Leg
+    skeleton.lKnee.z = _basePose.lKnee.z + legSwing;
+    skeleton.lFoot.z = _basePose.lFoot.z + legSwing;
+
+    // Right Leg (opposite phase)
+    skeleton.rKnee.z = _basePose.rKnee.z - legSwing;
+    skeleton.rFoot.z = _basePose.rFoot.z - legSwing;
+
+    // Arms (swing opposite to legs)
+    skeleton.lElbow.z = _basePose.lElbow.z - legSwing;
+    skeleton.lHand.z = _basePose.lHand.z - legSwing;
+
+    if (_attackTime > 0) {
+       _attackTime -= dt;
+       // Attack Animation: Thrust Right Arm
+       double progress = 1.0 - (_attackTime / 0.3); // 0.0 to 1.0
+       double thrust = sin(progress * pi) * 20; // extend out and back
+
+       skeleton.rElbow.x = _basePose.rElbow.x + thrust;
+       skeleton.rHand.x = _basePose.rHand.x + thrust * 1.5;
+
+       // Also rotate torso slightly? Maybe later.
+    } else {
+       // Normal arm swing if not attacking
+       skeleton.rElbow.z = _basePose.rElbow.z + legSwing;
+       skeleton.rHand.z = _basePose.rHand.z + legSwing;
+
+       // Reset X positions
+       skeleton.rElbow.x = _basePose.rElbow.x;
+       skeleton.rHand.x = _basePose.rHand.x;
     }
   }
 
@@ -213,6 +265,7 @@ class VanguardGame extends FlameGame with TapCallbacks {
   late InventoryDisplay inventoryDisplay;
 
   double nextSpawnX = 500;
+  int spawnCount = 0; // Track spawns for Boss
   final Random rng = Random();
 
   @override
@@ -232,8 +285,15 @@ class VanguardGame extends FlameGame with TapCallbacks {
 
     camera.viewport.add(joystick);
     camera.viewport.add(inventoryDisplay);
+  }
 
-    // Initial spawn removed, handled by update loop
+  @override
+  void onTapDown(TapDownEvent event) {
+    super.onTapDown(event);
+    // Avoid attacking if tapping HUD
+    if (!joystick.containsPoint(event.localPosition) && !inventoryDisplay.containsPoint(event.localPosition)) {
+      player.attack();
+    }
   }
 
   @override
@@ -257,10 +317,18 @@ class VanguardGame extends FlameGame with TapCallbacks {
     // Endless spawning
     final screenRight = camera.viewfinder.position.x + (size.x / 2 / camera.viewfinder.zoom);
     if (screenRight + 200 > nextSpawnX) {
-      if (rng.nextBool()) {
-        world.add(Rock(position: Vector2(nextSpawnX, 300 + rng.nextDouble() * 300)));
+      spawnCount++;
+      double spawnY = 300 + rng.nextDouble() * 300;
+
+      if (spawnCount % 5 == 0) {
+        // Spawn Boss every 5th spawn
+        world.add(Boss(position: Vector2(nextSpawnX, spawnY)));
       } else {
-        world.add(Enemy(position: Vector2(nextSpawnX, 300 + rng.nextDouble() * 300)));
+        if (rng.nextBool()) {
+          world.add(Rock(position: Vector2(nextSpawnX, spawnY)));
+        } else {
+          world.add(Enemy(position: Vector2(nextSpawnX, spawnY)));
+        }
       }
       nextSpawnX += 300 + rng.nextDouble() * 400;
     }
@@ -272,6 +340,7 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
   final Vector2 floorBounds;
   late StickmanAnimator animator;
   late RectangleComponent bodyHitbox;
+  int health = 100;
 
   Set<WeaponType> inventory = { WeaponType.sword };
   WeaponType currentWeapon = WeaponType.sword;
@@ -284,6 +353,25 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
   void equipWeapon(WeaponType type) {
     currentWeapon = type;
     animator.weaponType = type;
+  }
+
+  void attack() {
+    animator.triggerAttack();
+    // Simple hitbox check for attack
+    for (final c in gameRef.world.children) {
+      if (c is Enemy && c.distance(this) < 80) { // range check
+        c.takeDamage(10);
+      }
+    }
+  }
+
+  void takeDamage(int amount) {
+    health -= amount;
+    // Visual flash could go here
+    if (health <= 0) {
+      // Game Over logic (reset or stop)
+      removeFromParent(); // Simple death
+    }
   }
 
   @override
@@ -320,9 +408,21 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
 class Enemy extends PositionComponent with HasGameRef<VanguardGame> {
   late StickmanAnimator animator;
   late RectangleComponent bodyHitbox;
+  int health = 30;
+  double _attackCooldown = 0.0;
 
   Enemy({required Vector2 position}) : super(position: position, size: Vector2(60, 90), anchor: Anchor.bottomCenter) {
     animator = StickmanAnimator(color: Colors.red, weaponType: WeaponType.none);
+  }
+
+  void takeDamage(int amount) {
+    health -= amount;
+    animator.color = Colors.white; // Flash white
+    Future.delayed(const Duration(milliseconds: 100), () => animator.color = (this is Boss) ? Colors.purple : Colors.red);
+
+    if (health <= 0) {
+      removeFromParent();
+    }
   }
 
   @override
@@ -341,19 +441,47 @@ class Enemy extends PositionComponent with HasGameRef<VanguardGame> {
   void update(double dt) {
     super.update(dt);
     final player = gameRef.player;
-    final direction = (player.position - position).normalized();
+    if (player.parent == null) return; // Player dead
 
-    // Simple tracking
-    if (position.distanceTo(player.position) < 400 && position.distanceTo(player.position) > 40) {
+    final direction = (player.position - position).normalized();
+    double dist = position.distanceTo(player.position);
+
+    // AI Logic
+    if (dist < 400 && dist > 40) {
       position.add(direction * 100 * dt);
       animator.update(dt, direction * 100);
+    } else if (dist <= 40) {
+      // Attack range
+      animator.update(dt, Vector2.zero());
+      if (_attackCooldown <= 0) {
+        animator.triggerAttack();
+        player.takeDamage(5);
+        _attackCooldown = 1.0;
+      }
     } else {
        animator.update(dt, Vector2.zero());
     }
 
+    if (_attackCooldown > 0) _attackCooldown -= dt;
+
     priority = position.y.toInt();
   }
 }
+
+class Boss extends Enemy {
+  Boss({required super.position}) {
+    health = 100;
+    animator = StickmanAnimator(color: Colors.purple, scale: 2.0, weaponType: WeaponType.axe);
+    size = Vector2(120, 180);
+  }
+
+  @override
+  void takeDamage(int amount) {
+    super.takeDamage(amount);
+    // Boss specific reaction?
+  }
+}
+
 
 // ================= HELPERS (Loot, etc) =================
 
