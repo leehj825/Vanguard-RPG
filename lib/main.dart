@@ -7,15 +7,14 @@ import 'package:flame/text.dart';
 import 'package:flame/effects.dart';
 import 'package:flutter/material.dart';
 import 'dart:math';
-import 'package:vector_math/vector_math_64.dart' as v; // Required for the library
+import 'package:vector_math/vector_math_64.dart' as v;
 
 void main() {
   runApp(const GameWidget.controlled(gameFactory: VanguardGame.new));
 }
 
-// ================= STICKMAN LIBRARY (Adapted from leehj825/stickman-animator) =================
+// ================= STICKMAN LIBRARY ADAPTER =================
 
-/// Represents a single node (joint) in the skeleton hierarchy
 class StickmanNode {
   String id;
   v.Vector3 position;
@@ -32,64 +31,45 @@ class StickmanNode {
   }
 }
 
-/// The Skeleton holding all body parts
 class StickmanSkeleton {
   late StickmanNode root;
-
-  // Visual Properties
   double headRadius = 6.0;
   double strokeWidth = 3.0;
-
-  // Cache for fast access
   final Map<String, StickmanNode> _nodes = {};
 
   StickmanSkeleton() {
-    // Build Standard Hierarchy
     root = StickmanNode('hip', v.Vector3.zero());
-
     final neck = StickmanNode('neck', v.Vector3(0, -25, 0));
     root.children.add(neck);
-
     final head = StickmanNode('head', v.Vector3(0, -10, 0));
     neck.children.add(head);
-
-    // Shoulders
     final lShoulder = StickmanNode('lShoulder', v.Vector3(0, 0, 0));
     final rShoulder = StickmanNode('rShoulder', v.Vector3(0, 0, 0));
     neck.children.add(lShoulder);
     neck.children.add(rShoulder);
-
-    // Arms
     final lElbow = StickmanNode('lElbow', v.Vector3(-6, 10, 0));
     lShoulder.children.add(lElbow);
     final lHand = StickmanNode('lHand', v.Vector3(0, 10, 0));
     lElbow.children.add(lHand);
-
     final rElbow = StickmanNode('rElbow', v.Vector3(6, 10, 0));
     rShoulder.children.add(rElbow);
     final rHand = StickmanNode('rHand', v.Vector3(0, 10, 0));
     rElbow.children.add(rHand);
-
-    // Hips/Legs
     final lHip = StickmanNode('lHip', v.Vector3(0, 0, 0));
     final rHip = StickmanNode('rHip', v.Vector3(0, 0, 0));
     root.children.add(lHip);
     root.children.add(rHip);
-
     final lKnee = StickmanNode('lKnee', v.Vector3(-3, 12, 0));
     lHip.children.add(lKnee);
     final lFoot = StickmanNode('lFoot', v.Vector3(0, 12, 0));
     lKnee.children.add(lFoot);
-
     final rKnee = StickmanNode('rKnee', v.Vector3(3, 12, 0));
     rHip.children.add(rKnee);
     final rFoot = StickmanNode('rFoot', v.Vector3(0, 12, 0));
     rKnee.children.add(rFoot);
-
     _refreshNodeCache();
   }
 
-  // Private constructor for cloning
   StickmanSkeleton._fromRoot(this.root) {
     _refreshNodeCache();
   }
@@ -110,10 +90,8 @@ class StickmanSkeleton {
     return copy;
   }
 
-  // Safe Getters using the cache (or default to zero if missing to prevent crashes)
   v.Vector3 _getPos(String id) => _nodes[id]?.position ?? v.Vector3.zero();
 
-  // Expose specific bones for the user's data
   v.Vector3 get hip => _getPos('hip');
   v.Vector3 get neck => _getPos('neck');
   v.Vector3 get head => _getPos('head');
@@ -133,7 +111,6 @@ class StickmanSkeleton {
 
 // ================= USER POSE DATA =================
 
-// The L-Stand Pose provided by the user
 final StickmanSkeleton lStandPose = StickmanSkeleton()
   ..headRadius = 8.0
   ..strokeWidth = 5.3
@@ -148,7 +125,6 @@ final StickmanSkeleton lStandPose = StickmanSkeleton()
   ..rElbow.setValues(6.2, -7.4, 0.0)
   ..lHand.setValues(-10.0, 0.0, 0.0)
   ..rHand.setValues(10.0, 0.0, 0.0)
-  // Zero out shoulders if the user data implies they aren't used/offset
   ..lShoulder.setValues(0, 0, 0)
   ..rShoulder.setValues(0, 0, 0)
   ..lHip.setValues(0, 0, 0)
@@ -167,7 +143,7 @@ class StickmanAnimator {
   Color color;
   final double scale;
   WeaponType weaponType;
-  StickmanSkeleton skeleton; // Now using the library skeleton
+  StickmanSkeleton skeleton;
 
   double _facingAngle = 0.0;
 
@@ -175,10 +151,9 @@ class StickmanAnimator {
     required this.color,
     this.scale = 1.0,
     this.weaponType = WeaponType.none,
-  }) : skeleton = lStandPose.clone(); // Initialize with L-Stand Pose
+  }) : skeleton = lStandPose.clone();
 
   void update(double dt, Vector2 velocity) {
-    // Face direction of movement
     if (velocity.length > 10) {
       double targetAngle = velocity.x > 0 ? pi / 2 : -pi / 2;
       double diff = targetAngle - _facingAngle;
@@ -200,58 +175,37 @@ class StickmanAnimator {
 
     final Paint fillPaint = Paint()..color = color..style = PaintingStyle.fill;
 
-    // Helper to project 3D point to 2D screen (Simple perspective)
     Offset toScreen(v.Vector3 p) {
-      // 1. Rotate Y (Facing)
       double c = cos(_facingAngle);
       double s = sin(_facingAngle);
       double rx = p.x * c + p.z * s;
       double rz = -p.x * s + p.z * c;
-
-      // 2. Project
       return Offset(rx, p.y + (rz * 0.3));
     }
 
-    // Recursive Draw
     void drawNode(StickmanNode node, Offset parentPos) {
-      // Calculate absolute position (simplified: assuming user data is relative-ish or we just connect dots)
-      // The library renderer draws lines between parent and child.
-      // However, the provided data looks like absolute local offsets or world positions.
-      // We will draw lines from parent to child.
-
       Offset currentPos = toScreen(node.position);
-
-      // Special case: If node is root (hip), don't draw line to nowhere
       if (node.id != 'hip') {
         canvas.drawLine(parentPos, currentPos, paint);
       }
-
-      // Draw Head
       if (node.id == 'head') {
         canvas.drawCircle(currentPos, skeleton.headRadius, fillPaint);
       }
-
       for (var child in node.children) {
         drawNode(child, currentPos);
       }
     }
 
-    // Start drawing from root
     drawNode(skeleton.root, toScreen(skeleton.root.position));
 
-    // Draw Weapon
     if (weaponType != WeaponType.none) {
-      // Find right hand
       final rHandPos = toScreen(skeleton.rHand);
-      // Simple weapon line
       canvas.drawLine(rHandPos, rHandPos + Offset(20 * cos(_facingAngle), -20), Paint()..color=Colors.white..strokeWidth=2);
     }
 
     canvas.restore();
   }
 }
-
-// ================= MAIN GAME CLASSES =================
 
 class VanguardGame extends FlameGame with TapCallbacks {
   late Player player;
@@ -276,7 +230,6 @@ class VanguardGame extends FlameGame with TapCallbacks {
     camera.viewport.add(joystick);
     camera.viewport.add(inventoryDisplay);
 
-    // Spawn some scenery
     world.add(Rock(position: Vector2(400, 400)));
   }
 
@@ -306,7 +259,6 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
   late StickmanAnimator animator;
   late RectangleComponent bodyHitbox;
 
-  // Stats
   Set<WeaponType> inventory = { WeaponType.sword };
   WeaponType currentWeapon = WeaponType.sword;
 
@@ -345,7 +297,6 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
 
     animator.update(dt, velocity);
 
-    // Check loot
     for(final c in gameRef.world.children) {
       if (c is LootBox && c.toAbsoluteRect().overlaps(bodyHitbox.toAbsoluteRect())) c.pickup();
     }
@@ -365,11 +316,12 @@ class InventoryDisplay extends PositionComponent with HasGameRef<VanguardGame> {
 class LootBox extends PositionComponent with HasGameRef<VanguardGame> {
   LootBox({required Vector2 position}) : super(position: position, size: Vector2(30, 30), anchor: Anchor.center);
   @override Future<void> onLoad() async {
-    add(RectangleComponent(size: size, paint: BasicPalette.gold.paint()));
+    // FIXED: Using standard Paint instead of BasicPalette.gold
+    add(RectangleComponent(size: size, paint: Paint()..color = const Color(0xFFFFD700)));
     add(MoveEffect.by(Vector2(0,-10), EffectController(duration: 1, alternate: true, infinite: true)));
   }
   void pickup() {
-    gameRef.player.equipWeapon(WeaponType.axe); // Simple logic
+    gameRef.player.equipWeapon(WeaponType.axe);
     removeFromParent();
   }
 }
