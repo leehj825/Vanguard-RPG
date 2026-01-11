@@ -7,7 +7,7 @@ import 'package:flame/text.dart';
 import 'package:flame/effects.dart';
 import 'package:flutter/material.dart';
 import 'dart:math';
-import 'dart:ui';
+// Removed 'dart:ui' to avoid conflicts with material.dart
 
 void main() {
   runApp(const GameWidget.controlled(gameFactory: VanguardGame.new));
@@ -19,6 +19,10 @@ class SimpleVector3 {
   SimpleVector3(this.x, this.y, this.z);
   SimpleVector3 operator +(SimpleVector3 other) => SimpleVector3(x + other.x, y + other.y, z + other.z);
   SimpleVector3 operator *(double s) => SimpleVector3(x * s, y * s, z * s);
+
+  void setValues(double x, double y, double z) {
+    this.x = x; this.y = y; this.z = z;
+  }
 }
 
 // ================= ENUMS =================
@@ -36,6 +40,20 @@ extension ShapeOpacity on ShapeComponent {
   }
 }
 
+// ================= SKELETON SYSTEM =================
+class StickmanBone {
+  String id;
+  SimpleVector3 baseOffset;
+  SimpleVector3 animOffset = SimpleVector3(0,0,0);
+  SimpleVector3 rotation = SimpleVector3(0,0,0); // Euler angles
+  List<StickmanBone> children = [];
+  SimpleVector3 absolutePos = SimpleVector3(0,0,0); // Computed per frame
+
+  StickmanBone(this.id, this.baseOffset);
+
+  void addChild(StickmanBone child) => children.add(child);
+}
+
 // ================= STICKMAN ANIMATOR =================
 class StickmanAnimator {
   Color color;
@@ -44,30 +62,70 @@ class StickmanAnimator {
   bool isAttacking = false;
 
   double _time = 0.0;
-  double _runWeight = 0.0; // 0.0 = Idle, 1.0 = Running
+  double _runWeight = 0.0;
   double _facingAngle = 0.0;
   double _attackTimer = 0.0;
+
+  late StickmanBone root;
+  late Map<String, StickmanBone> bones;
 
   StickmanAnimator({
     required this.color,
     this.scale = 1.0,
     this.weaponType = WeaponType.none
-  });
+  }) {
+    _initSkeleton();
+  }
+
+  void _initSkeleton() {
+    // Define Skeleton matching "Stand" pose request and original dimensions
+    bones = {};
+
+    // Root
+    root = StickmanBone("hip", SimpleVector3(0,0,0)); bones["hip"] = root;
+
+    // Torso
+    var neck = StickmanBone("neck", SimpleVector3(0, -25, 0)); bones["neck"] = neck; root.addChild(neck);
+    var head = StickmanBone("head", SimpleVector3(0, -8, 0)); bones["head"] = head; neck.addChild(head); // Head offset from neck
+
+    // Arms
+    var lShoulder = StickmanBone("lShoulder", SimpleVector3(0,0,0)); bones["lShoulder"] = lShoulder; neck.addChild(lShoulder);
+    var lElbow = StickmanBone("lElbow", SimpleVector3(-6, 10, 0)); bones["lElbow"] = lElbow; lShoulder.addChild(lElbow);
+    var lHand = StickmanBone("lHand", SimpleVector3(0, 10, 0)); bones["lHand"] = lHand; lElbow.addChild(lHand);
+
+    var rShoulder = StickmanBone("rShoulder", SimpleVector3(0,0,0)); bones["rShoulder"] = rShoulder; neck.addChild(rShoulder);
+    var rElbow = StickmanBone("rElbow", SimpleVector3(6, 10, 0)); bones["rElbow"] = rElbow; rShoulder.addChild(rElbow);
+    var rHand = StickmanBone("rHand", SimpleVector3(0, 10, 0)); bones["rHand"] = rHand; rElbow.addChild(rHand);
+
+    // Legs
+    var lHip = StickmanBone("lHip", SimpleVector3(0,0,0)); bones["lHip"] = lHip; root.addChild(lHip);
+    var lKnee = StickmanBone("lKnee", SimpleVector3(-3, 12, 0)); bones["lKnee"] = lKnee; lHip.addChild(lKnee);
+    var lFoot = StickmanBone("lFoot", SimpleVector3(-3, 12, 0)); bones["lFoot"] = lFoot; lKnee.addChild(lFoot);
+
+    var rHip = StickmanBone("rHip", SimpleVector3(0,0,0)); bones["rHip"] = rHip; root.addChild(rHip);
+    var rKnee = StickmanBone("rKnee", SimpleVector3(3, 12, 0)); bones["rKnee"] = rKnee; rHip.addChild(rKnee);
+    var rFoot = StickmanBone("rFoot", SimpleVector3(3, 12, 0)); bones["rFoot"] = rFoot; rKnee.addChild(rFoot);
+  }
+
+  double get attackDuration {
+    switch (weaponType) {
+      case WeaponType.dagger: return 0.2;
+      case WeaponType.sword: return 0.5;
+      case WeaponType.axe: return 1.0;
+      default: return 0.3;
+    }
+  }
 
   void update(double dt, Vector2 velocity, bool isDashing) {
-    _time += dt * 10; // Animation Speed
+    _time += dt * 10;
 
-    // Determine Run Weight based on speed
     double speed = velocity.length;
     double targetWeight = speed > 10 ? 1.0 : 0.0;
     _runWeight += (targetWeight - _runWeight) * dt * 5;
 
-    // Determine Facing Angle (Profile View)
+    // Face Direction Logic
     if (speed > 10) {
-      // Move Right -> Face Right (pi/2)
-      // Move Left -> Face Left (-pi/2)
-      double targetAngle = velocity.x > 0 ? pi / 2 : -pi / 2;
-
+      double targetAngle = velocity.x > 0 ? -pi / 2 : pi / 2;
       double diff = targetAngle - _facingAngle;
       if (diff.abs() > pi) diff -= 2 * pi * diff.sign;
       _facingAngle += diff * dt * 10;
@@ -75,10 +133,62 @@ class StickmanAnimator {
 
     if (isAttacking) {
       _attackTimer += dt;
-      if (_attackTimer > 0.3) {
+      if (_attackTimer > attackDuration) {
         isAttacking = false;
         _attackTimer = 0.0;
       }
+    }
+
+    // --- ANIMATION LOGIC ---
+    // Reset all pose offsets
+    bones.values.forEach((b) { b.animOffset.setValues(0,0,0); b.rotation.setValues(0,0,0); });
+
+    // "Stand" Pose Request: rFoot offset by 7.8
+    // Only apply when not running full speed
+    if (_runWeight < 0.5) {
+       bones["rFoot"]!.animOffset.y = 7.8 * (1.0 - _runWeight);
+    }
+
+    // Running / Breathing Animation
+    double legSwing = sin(_time) * 0.8 * _runWeight;
+    double armSwing = cos(_time) * 0.8 * _runWeight;
+
+    // Breathing (Torso bob)
+    double breath = sin(_time * 0.5) * 1.0;
+    bones["neck"]!.rotation.y = breath * (1 - _runWeight); // Y offset actually? No rotation for bob.
+    // Hack: adjust baseOffset or animOffset for bobbing?
+    // Using animOffset on Neck
+    bones["neck"]!.animOffset.y = (breath * (1 - _runWeight)) + ((sin(_time)).abs() * 3.0 * _runWeight);
+
+    // Apply Rotations (X-axis for swinging)
+    bones["lHip"]!.rotation.x = legSwing;
+    bones["lKnee"]!.rotation.x = 0.2; // Slight bend offset
+
+    bones["rHip"]!.rotation.x = -legSwing;
+    bones["rKnee"]!.rotation.x = 0.2;
+
+    double lArmAngle = -armSwing;
+    double rArmAngle = armSwing;
+
+    if (isAttacking) {
+       double p = (_attackTimer / attackDuration).clamp(0.0, 1.0);
+       if (weaponType == WeaponType.none) rArmAngle = -1.5;
+       else rArmAngle = -2.8 + (2.6 * p);
+    } else if (weaponType != WeaponType.none) {
+       rArmAngle = -0.5;
+    }
+
+    bones["lShoulder"]!.rotation.x = lArmAngle;
+    bones["lElbow"]!.rotation.x = -0.3; // Forearm bend
+
+    bones["rShoulder"]!.rotation.x = rArmAngle;
+    bones["rElbow"]!.rotation.x = -0.3;
+
+    // Punch Extension
+    if (isAttacking && weaponType == WeaponType.none) {
+       double punchProgress = sin((_attackTimer / 0.3) * pi);
+       bones["rHand"]!.animOffset.z = punchProgress * 15;
+       bones["rHand"]!.animOffset.y = -punchProgress * 5;
     }
   }
 
@@ -95,137 +205,154 @@ class StickmanAnimator {
 
     final Paint fillPaint = Paint()..color = color..style = PaintingStyle.fill;
 
-    // --- 1. BASE SKELETON (Local Space) ---
-    SimpleVector3 hip = SimpleVector3(0, 0, 0);
-    SimpleVector3 neck = SimpleVector3(0, -25, 0);
+    // 1. Calculate Absolute Positions
+    _computeAbsolutePositions(root, SimpleVector3(0,0,0), SimpleVector3(0,0,0));
 
-    // Breathing / Bobbing
-    double breath = sin(_time * 0.5) * 1.0;
-    neck.y += breath * (1 - _runWeight);
-    neck.y += (sin(_time)).abs() * 3.0 * _runWeight;
+    // 2. Apply Y-Rotation (Facing) to all absolute positions
+    // This is easier than rotating every bone locally
+    Map<String, SimpleVector3> p3d = {};
+    bones.forEach((k, v) {
+      SimpleVector3 pos = SimpleVector3(v.absolutePos.x, v.absolutePos.y, v.absolutePos.z);
+      _applyRotationY(pos, _facingAngle);
+      p3d[k] = pos;
+    });
 
-    // Shoulders
-    SimpleVector3 lShoulder = SimpleVector3(0, neck.y, neck.z);
-    SimpleVector3 rShoulder = SimpleVector3(0, neck.y, neck.z);
+    // 3. Project to 2D
+    Map<String, Offset> p2d = {};
+    p3d.forEach((k, v) {
+      p2d[k] = _project(v, Vector2.zero());
+    });
 
-    // Hips
-    SimpleVector3 lHip = SimpleVector3(0, 0, 0);
-    SimpleVector3 rHip = SimpleVector3(0, 0, 0);
-
-    // --- 2. LIMB ANIMATION ---
-    double legSwing = sin(_time) * 0.8 * _runWeight;
-    double armSwing = cos(_time) * 0.8 * _runWeight;
-
-    // LEGS
-    SimpleVector3 lKnee = _rotateX(SimpleVector3(-3, 12, 0), legSwing) + lHip;
-    SimpleVector3 rKnee = _rotateX(SimpleVector3(3, 12, 0), -legSwing) + rHip;
-    SimpleVector3 lFoot = _rotateX(SimpleVector3(-3, 12, 0), legSwing + 0.2) + lKnee;
-    SimpleVector3 rFoot = _rotateX(SimpleVector3(3, 12, 0), -legSwing + 0.2) + rKnee;
-
-    // ARMS
-    double lArmAngle = -armSwing;
-    double rArmAngle = armSwing;
-
-    // Attack/Weapon Poses
-    if (isAttacking) rArmAngle = -1.5;
-    else if (weaponType != WeaponType.none) rArmAngle = -0.5; // Hold weapon ready
-
-    SimpleVector3 lElbow = _rotateX(SimpleVector3(-6, 10, 0), lArmAngle) + lShoulder;
-    SimpleVector3 rElbow = _rotateX(SimpleVector3(6, 10, 0), rArmAngle) + rShoulder;
-
-    SimpleVector3 lHand = _rotateX(SimpleVector3(0, 10, 0), lArmAngle - 0.3) + lElbow;
-    SimpleVector3 rHand = _rotateX(SimpleVector3(0, 10, 0), rArmAngle - 0.3) + rElbow;
-
-    // Attack Animation Override
-    if (isAttacking) {
-       double punchProgress = sin((_attackTimer / 0.3) * pi);
-       if (weaponType == WeaponType.none) {
-          rHand.z += punchProgress * 15;
-          rHand.y -= punchProgress * 5;
-       } else {
-          rHand.y += punchProgress * 10;
-          rHand.z += punchProgress * 10;
-       }
+    void drawBone(String start, String end) {
+      canvas.drawLine(p2d[start]!, p2d[end]!, paint);
     }
 
-    // --- 3. GATHER POINTS ---
-    List<SimpleVector3> points = [hip, neck, lShoulder, rShoulder, lHip, rHip, lKnee, rKnee, lFoot, rFoot, lElbow, rElbow, lHand, rHand];
-
-    // Weapon Tip Calculation (3D)
-    if (weaponType != WeaponType.none && weaponType != WeaponType.bow) {
-       double len = 20.0;
-       if (weaponType == WeaponType.dagger) len = 10.0;
-       if (weaponType == WeaponType.axe) len = 25.0;
-
-       // Weapon points forward (+Z) relative to arm
-       // Arm is rotated by rArmAngle around X
-       SimpleVector3 tipLocal = _rotateX(SimpleVector3(0, 0, len), rArmAngle);
-       points.add(rHand + tipLocal);
+    void drawLeft() {
+      drawBone("lHip", "lKnee"); drawBone("lKnee", "lFoot");
+      drawBone("lShoulder", "lElbow"); drawBone("lElbow", "lHand");
+      if (weaponType == WeaponType.bow) {
+        Offset hand = p2d["lHand"]!;
+        Paint bp = Paint()..color = Colors.brown..style = PaintingStyle.stroke..strokeWidth = 2;
+        canvas.drawArc(Rect.fromCenter(center: hand, width: 10, height: 30), (_facingAngle > 0 ? pi/2 : -pi/2), pi, false, bp);
+      }
     }
 
-    // --- 4. ROTATE & PROJECT ---
-    for (var p in points) {
-      _applyRotationY(p, _facingAngle);
+    void drawRight() {
+      drawBone("rHip", "rKnee"); drawBone("rKnee", "rFoot");
+      drawBone("rShoulder", "rElbow"); drawBone("rElbow", "rHand");
+
+      if (weaponType != WeaponType.none && weaponType != WeaponType.bow) {
+        Offset hand = p2d["rHand"]!;
+        // Calculate tip based on rHand position + projected vector
+        // Or better: use the bone rotation?
+        // Since we projected points, we need to project the weapon tip too.
+        // Weapon aligns with rHand bone (rElbow -> rHand).
+        // Let's use the stickmanBone "rHand" absolute rotation? No, we just have points.
+
+        // Use previous logic: Weapon vector relative to hand
+        // In local space of rHand: (0, len, 0)
+        double len = 20.0;
+        if (weaponType == WeaponType.dagger) len = 10.0;
+        if (weaponType == WeaponType.axe) len = 25.0;
+
+        // Parent (Elbow) rotation affects Hand. Hand rotation affects Weapon.
+        // rHand bone has `rotation`.
+        // To get accurate tip, we should add a "weaponTip" bone?
+        // Or just rotate vector by (rArmAngle - 0.3) manually like before?
+        // The rotation is encoded in the bone hierarchy now.
+        // But `p3d` doesn't have orientation.
+        // Let's deduce direction from Elbow->Hand
+        SimpleVector3 dir = p3d["rHand"]! + (p3d["rHand"]! + (p3d["rElbow"]! * -1)); // Vector Elbow->Hand
+        // Normalize? No, length varies with projection.
+        // Just add an extension vector in 3D space before projection.
+
+        // Re-calculate tip in 3D:
+        // We need the rotation of the rHand.
+        // Let's add a virtual bone for the weapon tip!
+        StickmanBone rHandBone = bones["rHand"]!;
+        // Tip is offset (0, len, 0) relative to rHand
+        SimpleVector3 tipLocal = _rotateX(SimpleVector3(0, len, 0), 0); // No extra rotation needed if aligned with bone Y
+        // Need to apply hierarchy rotations... this is getting complex for render.
+        // Let's keep it simple: Extend vector Elbow->Hand
+        SimpleVector3 armVec = bones["rHand"]!.absolutePos + (bones["rElbow"]!.absolutePos * -1);
+        double armLen = sqrt(armVec.x*armVec.x + armVec.y*armVec.y + armVec.z*armVec.z);
+        SimpleVector3 tip3d = bones["rHand"]!.absolutePos + (armVec * (len / armLen));
+
+        // Apply Y Rotation
+        _applyRotationY(tip3d, _facingAngle);
+        Offset tip = _project(tip3d, Vector2.zero());
+
+        Paint wp = Paint()..color = Colors.white..style = PaintingStyle.stroke..strokeWidth = 2;
+        if (weaponType == WeaponType.dagger) wp.color = Colors.yellow;
+        if (weaponType == WeaponType.sword) wp.color = Colors.brown;
+        if (weaponType == WeaponType.axe) wp.color = Colors.red;
+
+        canvas.drawLine(hand, tip, wp);
+        if (weaponType == WeaponType.axe) canvas.drawCircle(tip, 6, Paint()..color = Colors.grey..style = PaintingStyle.fill);
+        if (weaponType == WeaponType.sword) {
+           Offset mid = hand + (tip - hand) * 0.2;
+           Offset perp = Offset(tip.dy - hand.dy, hand.dx - tip.dx);
+           double l = sqrt(perp.dx*perp.dx + perp.dy*perp.dy);
+           if (l > 0) perp = perp.scale(1/l, 1/l) * 5.0;
+           canvas.drawLine(mid - perp, mid + perp, wp);
+        }
+      }
     }
-    List<Offset> p2d = points.map((p) => _project(p, Vector2.zero())).toList();
 
-    // --- 5. RENDER LINES ---
-    // Body
-    canvas.drawLine(p2d[0], p2d[1], paint);
-    // Head
-    Offset headCenter = _project(neck + SimpleVector3(0, -8, 0), Vector2.zero());
-    // Manual Y rotation for head offset (simple approx)
-    headCenter = _project(neck, Vector2.zero()) + Offset(0, -8);
-    canvas.drawCircle(headCenter, 6, fillPaint);
-
-    // Legs
-    canvas.drawLine(p2d[0], p2d[6], paint); canvas.drawLine(p2d[6], p2d[8], paint); // Left
-    canvas.drawLine(p2d[0], p2d[7], paint); canvas.drawLine(p2d[7], p2d[9], paint); // Right
-    // Arms
-    canvas.drawLine(p2d[1], p2d[10], paint); canvas.drawLine(p2d[10], p2d[12], paint); // Left
-    canvas.drawLine(p2d[1], p2d[11], paint); canvas.drawLine(p2d[11], p2d[13], paint); // Right
-
-    // Draw Weapon
-    if (weaponType != WeaponType.none && weaponType != WeaponType.bow) {
-       Offset hand = p2d[13];
-       Offset tip = p2d.last;
-
-       Paint wp = Paint()..color = Colors.white..style = PaintingStyle.stroke..strokeWidth = 2;
-       if (weaponType == WeaponType.dagger) wp.color = Colors.yellow;
-       if (weaponType == WeaponType.sword) wp.color = Colors.brown;
-       if (weaponType == WeaponType.axe) wp.color = Colors.red;
-
-       canvas.drawLine(hand, tip, wp);
-
-       // Axe Head
-       if (weaponType == WeaponType.axe) {
-         canvas.drawCircle(tip, 6, Paint()..color = Colors.grey..style = PaintingStyle.fill);
-       }
-       // Sword Guard
-       if (weaponType == WeaponType.sword) {
-         Offset mid = hand + (tip - hand) * 0.2;
-         // Perpendicular line in 2D?
-         Offset perp = Offset(tip.dy - hand.dy, hand.dx - tip.dx);
-         double len = sqrt(perp.dx*perp.dx + perp.dy*perp.dy);
-         if (len > 0) perp = perp.scale(1/len, 1/len) * 5.0;
-         canvas.drawLine(mid - perp, mid + perp, wp);
-       }
-    } else if (weaponType == WeaponType.bow) {
-       // Simple 2D Bow at Left Hand (p2d[12])
-       Offset hand = p2d[12];
-       Paint bp = Paint()..color = Colors.brown..style = PaintingStyle.stroke..strokeWidth = 2;
-       canvas.drawArc(Rect.fromCenter(center: hand, width: 10, height: 30), (_facingAngle > 0 ? -pi/2 : pi/2), pi, false, bp);
+    void drawBody() {
+      drawBone("hip", "neck");
+      // Head
+      Offset headCenter = p2d["head"]!;
+      canvas.drawCircle(headCenter, 6, fillPaint);
     }
 
+    if (sin(_facingAngle) >= 0) {
+       drawRight(); drawBody(); drawLeft();
+    } else {
+       drawLeft(); drawBody(); drawRight();
+    }
     canvas.restore();
   }
 
+  void _computeAbsolutePositions(StickmanBone bone, SimpleVector3 parentPos, SimpleVector3 parentRot) {
+    // 1. Accumulate Rotation
+    SimpleVector3 currentRot = parentRot + bone.rotation;
+
+    // 2. Apply Local Transformation: Base + Anim
+    SimpleVector3 local = bone.baseOffset + bone.animOffset;
+
+    // 3. Rotate Local vector by Current Accumulated Rotation
+    // This moves the bone end-point based on the joint rotation
+    local = _rotateX(local, currentRot.x);
+    local = _rotateY(local, currentRot.y);
+    local = _rotateZ(local, currentRot.z);
+
+    // 4. Absolute Position = Parent + Rotated Local
+    bone.absolutePos = parentPos + local;
+
+    for (var child in bone.children) {
+      // For children, the pivot is this bone's end point (absolutePos)
+      // and the rotation context includes this bone's rotation.
+      _computeAbsolutePositions(child, bone.absolutePos, currentRot);
+    }
+  }
+
+  // Math Helpers
   SimpleVector3 _rotateX(SimpleVector3 v, double angle) {
     double c = cos(angle);
     double s = sin(angle);
     return SimpleVector3(v.x, v.y * c - v.z * s, v.y * s + v.z * c);
   }
-
+  SimpleVector3 _rotateY(SimpleVector3 v, double angle) {
+    double c = cos(angle);
+    double s = sin(angle);
+    return SimpleVector3(v.x * c + v.z * s, v.y, -v.x * s + v.z * c);
+  }
+  SimpleVector3 _rotateZ(SimpleVector3 v, double angle) {
+    double c = cos(angle);
+    double s = sin(angle);
+    return SimpleVector3(v.x * c - v.y * s, v.x * s + v.y * c, v.z);
+  }
   void _applyRotationY(SimpleVector3 v, double angle) {
     double c = cos(angle);
     double s = sin(angle);
@@ -234,9 +361,7 @@ class StickmanAnimator {
     v.x = newX;
     v.z = newZ;
   }
-
   Offset _project(SimpleVector3 p, Vector2 center) {
-    // Simple perspective projection: x = x, y = y + z*0.3
     return Offset(center.x + p.x, center.y + p.y + (p.z * 0.3));
   }
 }
@@ -259,14 +384,11 @@ class VanguardGame extends FlameGame with TapCallbacks {
   late PlayerHealthBar playerHealthBar;
   late XpBarComponent xpBar;
 
-  // Boss Elements
   BossEnemy? currentBoss;
 
-  // Systems
   GameState gameState = GameState.running;
   double _spawnTimer = 0;
   double _distanceTraveled = 0;
-  double _nextBossDistance = 1000;
   double _bossWarningTimer = 0;
   double _lastBossTriggerX = 0;
   double _time = 0;
@@ -280,7 +402,6 @@ class VanguardGame extends FlameGame with TapCallbacks {
   Future<void> onLoad() async {
     camera.viewfinder.anchor = Anchor.center;
 
-    // --- HUD SETUP ---
     final knobPaint = BasicPalette.white.withAlpha(200).paint();
     final backgroundPaint = BasicPalette.white.withAlpha(50).paint();
 
@@ -300,18 +421,13 @@ class VanguardGame extends FlameGame with TapCallbacks {
       onPressed: () => player.activateSkill(),
       children: [TextComponent(text: "SWIRL", position: Vector2(25, 25), anchor: Anchor.center, textRenderer: TextPaint(style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.black)))]
     );
-    autoText = TextComponent(
-      text: "AUTO: ON",
-      textRenderer: TextPaint(style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
-      position: Vector2(50, 20),
-      anchor: Anchor.center,
-    );
-    autoButton.button!.add(autoText);
 
     autoButton = HudButtonComponent(
       button: RectangleComponent(size: Vector2(100, 40), paint: BasicPalette.black.withAlpha(150).paint()),
       onPressed: toggleAuto,
     );
+    // Initialize autoText BEFORE adding to button (though adding to button does not require it to be fully initialized, access in toggleAuto does)
+    // Actually, I removed the initialization in previous step by mistake. Adding it back.
     autoText = TextComponent(text: "AUTO: ON", position: Vector2(50, 20), anchor: Anchor.center, textRenderer: TextPaint(style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold)));
     autoButton.button!.add(autoText);
 
@@ -328,14 +444,12 @@ class VanguardGame extends FlameGame with TapCallbacks {
 
     bossHealthBar = BossHealthBar(game: this);
 
-    // --- WORLD ---
     player = Player(joystick, floorBounds: Vector2(200, 600));
     world.add(player);
 
     playerHealthBar = PlayerHealthBar(player: player);
     xpBar = XpBarComponent(player: player);
 
-    // --- VIEWPORT ---
     camera.viewport.add(joystick);
     camera.viewport.add(attackButton);
     camera.viewport.add(skillButton);
@@ -353,6 +467,9 @@ class VanguardGame extends FlameGame with TapCallbacks {
   @override
   void onGameResize(Vector2 size) {
     super.onGameResize(size);
+    // Prevent division by zero crash if window is initializing
+    if (size.x == 0 || size.y == 0) return;
+
     bool isPortrait = size.y > size.x;
     double targetZoom = isPortrait ? size.x / 450 : size.y / 800;
     camera.viewfinder.zoom = targetZoom;
@@ -460,10 +577,9 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
   final JoystickComponent joystick;
   final Vector2 floorBounds;
 
-  // Visuals
   late StickmanAnimator animator;
-  late RectangleComponent bodyHitbox; // Hidden
-  late RectangleComponent weaponHitbox; // Hidden
+  late RectangleComponent bodyHitbox;
+  late RectangleComponent weaponHitbox;
   late CircleComponent swirlEffect;
 
   Set<WeaponType> inventory = { WeaponType.sword };
@@ -587,7 +703,6 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
     if (_damageCooldown > 0 || gameRef.isGameOver) return;
     currentHp -= amount; _damageCooldown = 0.5;
 
-    // Flash Red
     animator.color = Colors.red;
     Future.delayed(const Duration(milliseconds: 200), () {
       if (isMounted) animator.color = Colors.green;
@@ -632,8 +747,6 @@ class Enemy extends PositionComponent with HasGameRef<VanguardGame> {
     animator = StickmanAnimator(color: Colors.red, weaponType: WeaponType.sword);
   }
 
-  late RectangleComponent hpBar;
-
   @override
   Future<void> onLoad() async {
     bodyHitbox = RectangleComponent(size: size, paint: Paint()..color = Colors.transparent);
@@ -645,15 +758,14 @@ class Enemy extends PositionComponent with HasGameRef<VanguardGame> {
   void render(Canvas canvas) {
     animator.render(canvas, Vector2(size.x/2, size.y), size.y);
     super.render(canvas);
-    // Draw Mini HP Bar
     canvas.drawRect(Rect.fromLTWH(0, -10, 60, 6), PaletteEntry(Colors.red).paint());
     canvas.drawRect(Rect.fromLTWH(0, -10, 60 * (currentHp/maxHp).clamp(0,1), 6), PaletteEntry(Colors.green).paint());
   }
 
   @override
   void update(double dt) {
-    // Manual child update for hitboxes
-    for(final c in children) c.update(dt);
+    // IMPORTANT: Call super.update(dt) so children (hitboxes) update correctly
+    super.update(dt);
 
     if (_damageCooldown > 0) _damageCooldown -= dt;
     priority = position.y.toInt();
@@ -681,7 +793,6 @@ class Enemy extends PositionComponent with HasGameRef<VanguardGame> {
     if (_damageCooldown > 0) return;
     currentHp -= amount; _damageCooldown = 0.2;
 
-    // Flash White
     animator.color = Colors.white;
     Future.delayed(const Duration(milliseconds: 100), () {
       if (isMounted) animator.color = Colors.red;
@@ -710,8 +821,9 @@ class BossEnemy extends Enemy {
 
   @override
   void update(double dt) {
-    // Override Update for Boss AI
-    for(final c in children) c.update(dt);
+    // IMPORTANT: Call super.update(dt)
+    super.update(dt);
+
     if (_damageCooldown > 0) _damageCooldown -= dt;
     priority = position.y.toInt();
 
@@ -734,24 +846,23 @@ class BossEnemy extends Enemy {
          velocity = dir * moveSpeed;
          position.add(velocity * dt);
        } else {
-         isAttacking = true; // Visual only, damage is contact or hitbox?
-         // Re-use weaponHitbox logic or Contact
+         isAttacking = true;
          if (toAbsoluteRect().overlaps(player.bodyHitbox.toAbsoluteRect())) player.takeDamage(1);
        }
     }
 
-    animator.isAttacking = isAttacking || isDashing; // Animate attack during dash?
+    animator.isAttacking = isAttacking || isDashing;
     animator.update(dt, velocity, isDashing);
   }
 
   @override
   void takeDamage(double amount) {
+    // Override manual takeDamage because Enemy.takeDamage has lower cooldown/different logic
     if (_damageCooldown > 0) return;
     currentHp -= amount; _damageCooldown = 0.2;
     gameRef.world.add(DamageText("-${amount.toInt()}", position: position.clone()..y-=60));
 
     if (currentHp <= 0) {
-      // Boss Loot & Victory
       for(int i=0; i<3; i++) {
          gameRef.world.add(LootBox(position: position + Vector2(i*40.0 - 40, 0)));
       }
@@ -850,12 +961,11 @@ class InventorySlot extends RectangleComponent with TapCallbacks, HasGameRef<Van
   void onTapDown(TapDownEvent event) { if (storedWeapon != null) gameRef.player.equipWeapon(storedWeapon!); }
 }
 
-// ================= HELPERS (Loot, Rock, Text, Bars) =================
+// ================= HELPERS =================
 class LootBox extends PositionComponent with HasGameRef<VanguardGame> {
   LootBox({required Vector2 position}) : super(position: position, size: Vector2(30, 30), anchor: Anchor.center);
   @override Future<void> onLoad() async { add(RectangleComponent(size: size, paint: Paint()..color = const Color(0xFFFFD700))); add(MoveEffect.by(Vector2(0,-10), EffectController(duration: 1, alternate: true, infinite: true))); }
   void pickup() {
-    // Pick random weapon (dagger, sword, axe), skipping none
     final type = [WeaponType.dagger, WeaponType.sword, WeaponType.axe][Random().nextInt(3)];
     gameRef.player.collectLoot(type);
     removeFromParent();
