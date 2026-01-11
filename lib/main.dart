@@ -43,30 +43,28 @@ class StickmanSkeleton {
     root.children.add(neck);
     final head = StickmanNode('head', v.Vector3(0, -10, 0));
     neck.children.add(head);
-    final lShoulder = StickmanNode('lShoulder', v.Vector3(0, 0, 0));
-    final rShoulder = StickmanNode('rShoulder', v.Vector3(0, 0, 0));
-    neck.children.add(lShoulder);
-    neck.children.add(rShoulder);
+
+    // Updated topology: Direct connections (no shoulders or hip-joints)
     final lElbow = StickmanNode('lElbow', v.Vector3(-6, 10, 0));
-    lShoulder.children.add(lElbow);
+    neck.children.add(lElbow);
     final lHand = StickmanNode('lHand', v.Vector3(0, 10, 0));
     lElbow.children.add(lHand);
+
     final rElbow = StickmanNode('rElbow', v.Vector3(6, 10, 0));
-    rShoulder.children.add(rElbow);
+    neck.children.add(rElbow);
     final rHand = StickmanNode('rHand', v.Vector3(0, 10, 0));
     rElbow.children.add(rHand);
-    final lHip = StickmanNode('lHip', v.Vector3(0, 0, 0));
-    final rHip = StickmanNode('rHip', v.Vector3(0, 0, 0));
-    root.children.add(lHip);
-    root.children.add(rHip);
+
     final lKnee = StickmanNode('lKnee', v.Vector3(-3, 12, 0));
-    lHip.children.add(lKnee);
+    root.children.add(lKnee);
     final lFoot = StickmanNode('lFoot', v.Vector3(0, 12, 0));
     lKnee.children.add(lFoot);
+
     final rKnee = StickmanNode('rKnee', v.Vector3(3, 12, 0));
-    rHip.children.add(rKnee);
+    root.children.add(rKnee);
     final rFoot = StickmanNode('rFoot', v.Vector3(0, 12, 0));
     rKnee.children.add(rFoot);
+
     _refreshNodeCache();
   }
 
@@ -95,10 +93,7 @@ class StickmanSkeleton {
   v.Vector3 get hip => _getPos('hip');
   v.Vector3 get neck => _getPos('neck');
   v.Vector3 get head => _getPos('head');
-  v.Vector3 get lShoulder => _getPos('lShoulder');
-  v.Vector3 get rShoulder => _getPos('rShoulder');
-  v.Vector3 get lHip => _getPos('lHip');
-  v.Vector3 get rHip => _getPos('rHip');
+  // Removed shoulders and hip-joints
   v.Vector3 get lKnee => _getPos('lKnee');
   v.Vector3 get rKnee => _getPos('rKnee');
   v.Vector3 get lFoot => _getPos('lFoot');
@@ -111,9 +106,9 @@ class StickmanSkeleton {
 
 // ================= USER POSE DATA =================
 
-final StickmanSkeleton lStandPose = StickmanSkeleton()
-  ..headRadius = 8.0
-  ..strokeWidth = 5.3
+final StickmanSkeleton myPose = StickmanSkeleton()
+  ..headRadius = 6.9
+  ..strokeWidth = 5.4
   ..hip.setValues(1.0, 0.0, 0.0)
   ..neck.setValues(0.0, -14.7, 0.0)
   ..head.setValues(0.0, -22.0, 0.0)
@@ -124,11 +119,7 @@ final StickmanSkeleton lStandPose = StickmanSkeleton()
   ..lElbow.setValues(-6.1, -7.2, 0.0)
   ..rElbow.setValues(6.2, -7.4, 0.0)
   ..lHand.setValues(-10.0, 0.0, 0.0)
-  ..rHand.setValues(10.0, 0.0, 0.0)
-  ..lShoulder.setValues(0, 0, 0)
-  ..rShoulder.setValues(0, 0, 0)
-  ..lHip.setValues(0, 0, 0)
-  ..rHip.setValues(0, 0, 0);
+  ..rHand.setValues(10.0, 0.0, 0.0);
 
 
 // ================= GAME COMPONENTS =================
@@ -154,7 +145,7 @@ class StickmanAnimator {
     required this.color,
     this.scale = 1.0,
     this.weaponType = WeaponType.none,
-  }) : skeleton = lStandPose.clone(), _basePose = lStandPose.clone();
+  }) : skeleton = myPose.clone(), _basePose = myPose.clone(); // Updated to use myPose
 
   void triggerAttack() {
     if (_attackTime <= 0) {
@@ -191,21 +182,12 @@ class StickmanAnimator {
       skeleton.lElbow.x = _basePose.lElbow.x - legSwing;
       skeleton.lHand.x = _basePose.lHand.x - legSwing;
 
+      // Right Arm (swing with legs, or opposite if you prefer)
+      // Note: This might get overridden by attack logic below if attacking
+      skeleton.rElbow.x = _basePose.rElbow.x + legSwing;
+      skeleton.rHand.x = _basePose.rHand.x + legSwing;
+
     } else {
-      _runTime = 0;
-      // Reset logic could be added here to return to base pose
-    }
-
-    // 3. Handle Attack Animation
-    if (_attackTime > 0) {
-       _attackTime -= dt;
-       // Attack Animation: Thrust Right Arm
-       double progress = 1.0 - (_attackTime / 0.3); // 0.0 to 1.0
-       double thrust = sin(progress * pi) * 20; // extend out and back
-
-       skeleton.rElbow.x = _basePose.rElbow.x + thrust;
-       skeleton.rHand.x = _basePose.rHand.x + thrust * 1.5;
-    } else if (velocity.length <= 10) {
        // Reset limbs if standing still and not attacking
        skeleton.rElbow.x = _basePose.rElbow.x;
        skeleton.rHand.x = _basePose.rHand.x;
@@ -219,12 +201,17 @@ class StickmanAnimator {
        skeleton.rKnee.x = _basePose.rKnee.x;
        skeleton.rFoot.x = _basePose.rFoot.x;
        skeleton.rFoot.y = _basePose.rFoot.y;
-    } else {
-       // Running arms logic applies (handled in run block above for X swing)
-       // But we need to ensure Y/Z reset or consistent state if we modified them previously
-       double legSwing = sin(_runTime) * 8;
-       skeleton.rElbow.x = _basePose.rElbow.x + legSwing;
-       skeleton.rHand.x = _basePose.rHand.x + legSwing;
+    }
+
+    // 3. Handle Attack Animation
+    if (_attackTime > 0) {
+       _attackTime -= dt;
+       // Attack Animation: Thrust Right Arm
+       double progress = 1.0 - (_attackTime / 0.3); // 0.0 to 1.0
+       double thrust = sin(progress * pi) * 20; // extend out and back
+
+       skeleton.rElbow.x = _basePose.rElbow.x + thrust;
+       skeleton.rHand.x = _basePose.rHand.x + thrust * 1.5;
     }
   }
 
@@ -242,7 +229,6 @@ class StickmanAnimator {
 
     final Paint fillPaint = Paint()..color = color..style = PaintingStyle.fill;
 
-    // Simple 2D projection (Z ignored as visual depth)
     Offset toScreen(v.Vector3 p) {
       return Offset(p.x, p.y);
     }
