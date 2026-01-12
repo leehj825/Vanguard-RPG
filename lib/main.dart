@@ -193,7 +193,7 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
     // FIXED: Use 'Kick' because 'attack' does not exist in test.sap
     animator?.play('Kick');
 
-    Vector2 tipWorld = position + Vector2(40 * _facingDirection, -45);
+    Vector2 tipWorld = position + Vector2(40 * cos(_facingAngle), -45);
 
     for (final c in gameRef.world.children) {
       if (c is Enemy) {

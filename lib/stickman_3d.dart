@@ -48,7 +48,13 @@ class StickmanAnimator {
 
            // Force kick to not loop
            if (animator.clips.containsKey('kick')) {
-             animator.clips['kick']!.isLooping = false;
+             final oldClip = animator.clips['kick']!;
+             animator.clips['kick'] = StickmanClip(
+               name: oldClip.name,
+               keyframes: oldClip.keyframes,
+               fps: oldClip.fps,
+               isLooping: false,
+             );
            }
         } else {
            // Try parsing root keys as clip names (fallback)
