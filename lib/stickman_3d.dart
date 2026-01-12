@@ -1,4 +1,4 @@
-import 'dart:ui';
+import 'dart:ui' hide Color, Paint, Size, Offset; // Hide conflicting types
 import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/services.dart';
@@ -44,6 +44,11 @@ class StickmanAnimator {
               for (var key in clipsData.keys) {
                  animator.clips[key.toLowerCase()] = StickmanClip.fromJson(clipsData[key]);
               }
+           }
+
+           // Force kick to not loop
+           if (animator.clips.containsKey('kick')) {
+             animator.clips['kick']!.isLooping = false;
            }
         } else {
            // Try parsing root keys as clip names (fallback)
@@ -107,23 +112,22 @@ class StickmanAnimator {
     _controller.update(dt, vx, vy);
   }
 
-  void render(Canvas canvas, v.Vector2 position, double height, double facingDirection) {
+  void render(Canvas canvas, v.Vector2 position, double height, double rotation) {
     // USE CUSTOM PAINTER TO DISABLE GRID
     final painter = _NoGridStickmanPainter(
       controller: _controller,
       color: color,
-      cameraView: CameraView.side,
+      cameraView: CameraView.free,
       viewZoom: 1.0,
       viewPan: Offset.zero,
       cameraHeightOffset: 0,
       viewRotationX: 0,
-      viewRotationY: 0,
+      viewRotationY: -rotation, // Negate rotation to match standard orientation? atan2 goes CCW, usually rotY is also CCW but let's see.
     );
 
     canvas.save();
     canvas.translate(position.x, position.y);
-    canvas.scale(facingDirection, 1.0);
-    // Use Width 0 to ensure centering at the translated position for correct flipping
+    // Remove scale flip, rely on rotation
     painter.paint(canvas, Size(0, height));
     canvas.restore();
   }

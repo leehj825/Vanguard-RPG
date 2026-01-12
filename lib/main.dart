@@ -161,7 +161,7 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
   List<WeaponType> inventory = [WeaponType.sword];
   WeaponType currentWeapon = WeaponType.sword;
 
-  double _facingDirection = 1.0;
+  double _facingAngle = 0.0;
 
   Player(this.joystick, {required this.floorBounds}) : super(size: Vector2(150, 225), anchor: Anchor.bottomCenter) {
     position = Vector2(100, 300);
@@ -216,7 +216,7 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
   @override
   void render(Canvas canvas) {
     // FIXED: Use v.Vector2 (64-bit) explicitly to avoid type mismatch with Flame/stickman_3d components
-    animator?.render(canvas, v.Vector2(size.x/2, size.y), size.y, _facingDirection);
+    animator?.render(canvas, v.Vector2(size.x/2, size.y), size.y, _facingAngle);
     super.render(canvas);
   }
 
@@ -228,7 +228,7 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
       velocity = joystick.relativeDelta * 250;
       position.add(velocity * dt);
 
-      if (velocity.x.abs() > 0.1) _facingDirection = velocity.x.sign;
+      _facingAngle = atan2(velocity.y, velocity.x);
     }
 
     position.y = position.y.clamp(floorBounds.x, floorBounds.y);
@@ -260,7 +260,7 @@ class Enemy extends PositionComponent with HasGameRef<VanguardGame> {
   StickmanAnimator? animator;
   int health = 30;
   double _attackCooldown = 0.0;
-  double _facingDirection = 1.0;
+  double _facingAngle = 0.0;
 
   Enemy({required Vector2 position}) : super(position: position, size: Vector2(150, 225), anchor: Anchor.bottomCenter);
 
@@ -284,7 +284,7 @@ class Enemy extends PositionComponent with HasGameRef<VanguardGame> {
   @override
   void render(Canvas canvas) {
     // FIXED: Use v.Vector2 (64-bit) explicitly
-    animator?.render(canvas, v.Vector2(size.x/2, size.y), size.y, _facingDirection);
+    animator?.render(canvas, v.Vector2(size.x/2, size.y), size.y, _facingAngle);
     super.render(canvas);
   }
 
@@ -306,7 +306,6 @@ class Enemy extends PositionComponent with HasGameRef<VanguardGame> {
     if (dist < 400 && dist > 50) {
       Vector2 dir = (player.position - position).normalized();
       position.add(dir * 80 * dt);
-      if (dir.x.abs() > 0.1) _facingDirection = dir.x.sign;
 
       vx = dir.x * 80;
       vy = dir.y * 80;
