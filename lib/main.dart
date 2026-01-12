@@ -29,6 +29,7 @@ class VanguardGame extends FlameGame with TapCallbacks {
   late InventoryDisplay inventoryDisplay;
   late BossWarningText bossWarning;
   late BossHealthBar bossHealthBar;
+  late HudButtonComponent kickButton;
 
   double distanceTraveled = 0;
   double nextBossDistance = 1000;
@@ -58,13 +59,29 @@ class VanguardGame extends FlameGame with TapCallbacks {
     camera.viewport.add(inventoryDisplay);
     camera.viewport.add(bossWarning);
     camera.viewport.add(bossHealthBar);
+
+    kickButton = HudButtonComponent(
+      button: CircleComponent(radius: 30, paint: BasicPalette.red.withAlpha(200).paint()),
+      buttonDown: CircleComponent(radius: 30, paint: BasicPalette.white.withAlpha(200).paint()),
+      onPressed: () => player.attack(),
+      anchor: Anchor.center,
+    );
+    camera.viewport.add(kickButton);
   }
 
   @override
   void onTapDown(TapDownEvent event) {
     super.onTapDown(event);
-    if (!joystick.containsPoint(event.localPosition) && !inventoryDisplay.containsPoint(event.localPosition)) {
-      player.attack();
+    // Removed direct tap attack to rely on button, or keep it as backup?
+    // Keeping it as backup if not clicking HUD, but now we have a button.
+    if (!joystick.containsPoint(event.localPosition) && !inventoryDisplay.containsPoint(event.localPosition) && !kickButton.containsPoint(event.localPosition)) {
+      // player.attack(); // Disable tap-to-attack to prioritize button usage? Or keep?
+      // User said "I do not see kick button", implies they want a button.
+      // I'll keep tap-to-attack disabled to avoid confusion or accidental taps,
+      // or keep it for convenience. Let's keep it but check button bounds.
+      // Actually, HudButton consumes the event if pressed.
+
+      // Let's rely on the button as requested.
     }
   }
 
@@ -79,6 +96,7 @@ class VanguardGame extends FlameGame with TapCallbacks {
       inventoryDisplay.position = Vector2(size.x / 2 - 175, 20);
       bossWarning.position = size / 2;
       bossHealthBar.position = Vector2(size.x / 2 - 200, 80);
+      kickButton.position = Vector2(size.x - 60, size.y - 60);
     }
   }
 
@@ -143,9 +161,9 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
   List<WeaponType> inventory = [WeaponType.sword];
   WeaponType currentWeapon = WeaponType.sword;
 
-  double _facingDirection = 1.0;
+  double _facingAngle = 0.0;
 
-  Player(this.joystick, {required this.floorBounds}) : super(size: Vector2(60, 90), anchor: Anchor.bottomCenter) {
+  Player(this.joystick, {required this.floorBounds}) : super(size: Vector2(150, 225), anchor: Anchor.bottomCenter) {
     position = Vector2(100, 300);
   }
 
@@ -172,9 +190,10 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
   }
 
   void attack() {
-    animator?.play('attack');
+    // FIXED: Use 'Kick' because 'attack' does not exist in test.sap
+    animator?.play('Kick');
 
-    Vector2 tipWorld = position + Vector2(40 * _facingDirection, -45);
+    Vector2 tipWorld = position + Vector2(40 * cos(_facingAngle), -45);
 
     for (final c in gameRef.world.children) {
       if (c is Enemy) {
@@ -197,7 +216,7 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
   @override
   void render(Canvas canvas) {
     // FIXED: Use v.Vector2 (64-bit) explicitly to avoid type mismatch with Flame/stickman_3d components
-    animator?.render(canvas, v.Vector2(size.x/2, size.y), size.y);
+    animator?.render(canvas, v.Vector2(size.x/2, size.y), size.y, _facingAngle);
     super.render(canvas);
   }
 
@@ -209,19 +228,26 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
       velocity = joystick.relativeDelta * 250;
       position.add(velocity * dt);
 
-      if (velocity.x.abs() > 0.1) _facingDirection = velocity.x.sign;
+      _facingAngle = atan2(velocity.y, velocity.x);
     }
 
     position.y = position.y.clamp(floorBounds.x, floorBounds.y);
     priority = position.y.toInt();
 
     if (animator != null) {
+      if (!animator!.isPlaying('Kick')) {
         if (velocity.length > 10) {
-            animator!.play('run');
+            animator!.play('Run'); // This now finds 'Run' due to case-insensitive fix
         } else {
-            animator!.play('idle');
+            animator!.play('idle'); // Will fallback to procedural pose since 'idle' is missing
         }
-        animator!.update(dt);
+
+        // FIXED: Pass velocity to allow procedural animation fallbacks
+        animator!.update(dt, velocity.x, velocity.y);
+      } else {
+        // While kicking, update without velocity to keep it in place (or pass velocity if you want sliding kick)
+        animator!.update(dt, 0, 0);
+      }
     }
 
     for(final c in gameRef.world.children) {
@@ -234,9 +260,9 @@ class Enemy extends PositionComponent with HasGameRef<VanguardGame> {
   StickmanAnimator? animator;
   int health = 30;
   double _attackCooldown = 0.0;
-  double _facingDirection = 1.0;
+  double _facingAngle = 0.0;
 
-  Enemy({required Vector2 position}) : super(position: position, size: Vector2(60, 90), anchor: Anchor.bottomCenter);
+  Enemy({required Vector2 position}) : super(position: position, size: Vector2(150, 225), anchor: Anchor.bottomCenter);
 
   @override
   Future<void> onLoad() async {
@@ -258,7 +284,7 @@ class Enemy extends PositionComponent with HasGameRef<VanguardGame> {
   @override
   void render(Canvas canvas) {
     // FIXED: Use v.Vector2 (64-bit) explicitly
-    animator?.render(canvas, v.Vector2(size.x/2, size.y), size.y);
+    animator?.render(canvas, v.Vector2(size.x/2, size.y), size.y, _facingAngle);
     super.render(canvas);
   }
 
@@ -269,29 +295,38 @@ class Enemy extends PositionComponent with HasGameRef<VanguardGame> {
     if (player.parent == null || animator == null) return;
 
     double dist = position.distanceTo(player.position);
+    double vx = 0;
+    double vy = 0;
+
+    if (animator != null && animator!.isPlaying('Kick')) {
+       animator!.update(dt, 0, 0);
+       return;
+    }
 
     if (dist < 400 && dist > 50) {
       Vector2 dir = (player.position - position).normalized();
       position.add(dir * 80 * dt);
-      if (dir.x.abs() > 0.1) _facingDirection = dir.x.sign;
 
-      animator!.play('run');
-      animator!.update(dt);
+      vx = dir.x * 80;
+      vy = dir.y * 80;
+
+      animator!.play('Run');
+      animator!.update(dt, vx, vy);
 
     } else if (dist <= 50) {
-      animator!.play('idle');
-      animator!.update(dt);
-
       if (_attackCooldown <= 0) {
-        animator!.play('attack');
+        animator!.play('Kick'); // Use Kick
         if (player.position.distanceTo(position) < 50) {
           player.takeDamage(5);
         }
         _attackCooldown = 1.5;
+      } else {
+        animator!.play('idle');
       }
+      animator!.update(dt, 0, 0);
     } else {
       animator!.play('idle');
-      animator!.update(dt);
+      animator!.update(dt, 0, 0);
     }
 
     if (_attackCooldown > 0) _attackCooldown -= dt;
@@ -302,7 +337,7 @@ class Enemy extends PositionComponent with HasGameRef<VanguardGame> {
 class Boss extends Enemy {
   Boss({required super.position}) {
     health = 200;
-    size = Vector2(120, 180);
+    size = Vector2(300, 450);
   }
 
   @override
