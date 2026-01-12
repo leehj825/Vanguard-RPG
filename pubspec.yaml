@@ -13,6 +13,12 @@ dependencies:
   flame_svg: ^1.11.18
   vector_math: ^2.1.4
 
+  # CHANGED: Dependency name must match the package's internal name "stickman_3d"
+  stickman_3d:
+    git:
+      url: https://github.com/leehj825/stickman-animator.git
+      ref: main # CHANGED: Branch set to main
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -20,3 +26,6 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  assets:
+    - assets/
