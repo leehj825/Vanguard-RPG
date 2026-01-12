@@ -8,103 +8,11 @@ import 'package:flame/effects.dart';
 import 'package:flutter/material.dart';
 import 'dart:math';
 import 'package:vector_math/vector_math_64.dart' as v;
+import 'package:stickman_animator/stickman_animator.dart';
 
 void main() {
   runApp(const GameWidget.controlled(gameFactory: VanguardGame.new));
 }
-
-// ================= STICKMAN LIBRARY ADAPTER =================
-
-class StickmanNode {
-  String id;
-  v.Vector3 position;
-  List<StickmanNode> children = [];
-  StickmanNode(this.id, v.Vector3 pos) : position = v.Vector3.copy(pos);
-  StickmanNode clone() {
-    final copy = StickmanNode(id, position);
-    for (final child in children) copy.children.add(child.clone());
-    return copy;
-  }
-}
-
-class StickmanSkeleton {
-  late StickmanNode root;
-  double headRadius = 6.0;
-  double strokeWidth = 3.0;
-  final Map<String, StickmanNode> _nodes = {};
-
-  StickmanSkeleton() {
-    root = StickmanNode('hip', v.Vector3.zero());
-    final neck = StickmanNode('neck', v.Vector3(0, -25, 0));
-    root.children.add(neck);
-    final head = StickmanNode('head', v.Vector3(0, -10, 0));
-    neck.children.add(head);
-    final lElbow = StickmanNode('lElbow', v.Vector3(-6, 10, 0));
-    neck.children.add(lElbow);
-    final lHand = StickmanNode('lHand', v.Vector3(0, 10, 0));
-    lElbow.children.add(lHand);
-    final rElbow = StickmanNode('rElbow', v.Vector3(6, 10, 0));
-    neck.children.add(rElbow);
-    final rHand = StickmanNode('rHand', v.Vector3(0, 10, 0));
-    rElbow.children.add(rHand);
-    final lKnee = StickmanNode('lKnee', v.Vector3(-3, 12, 0));
-    root.children.add(lKnee);
-    final lFoot = StickmanNode('lFoot', v.Vector3(0, 12, 0));
-    lKnee.children.add(lFoot);
-    final rKnee = StickmanNode('rKnee', v.Vector3(3, 12, 0));
-    root.children.add(rKnee);
-    final rFoot = StickmanNode('rFoot', v.Vector3(0, 12, 0));
-    rKnee.children.add(rFoot);
-    _refreshNodeCache();
-  }
-
-  StickmanSkeleton._fromRoot(this.root) { _refreshNodeCache(); }
-
-  void _refreshNodeCache() {
-    _nodes.clear();
-    void traverse(StickmanNode node) {
-      _nodes[node.id] = node;
-      for (var c in node.children) traverse(c);
-    }
-    traverse(root);
-  }
-
-  StickmanSkeleton clone() {
-    final copy = StickmanSkeleton._fromRoot(root.clone());
-    copy.headRadius = headRadius;
-    copy.strokeWidth = strokeWidth;
-    return copy;
-  }
-
-  v.Vector3 _getPos(String id) => _nodes[id]?.position ?? v.Vector3.zero();
-  v.Vector3 get hip => _getPos('hip');
-  v.Vector3 get neck => _getPos('neck');
-  v.Vector3 get head => _getPos('head');
-  v.Vector3 get lKnee => _getPos('lKnee');
-  v.Vector3 get rKnee => _getPos('rKnee');
-  v.Vector3 get lFoot => _getPos('lFoot');
-  v.Vector3 get rFoot => _getPos('rFoot');
-  v.Vector3 get lElbow => _getPos('lElbow');
-  v.Vector3 get rElbow => _getPos('rElbow');
-  v.Vector3 get lHand => _getPos('lHand');
-  v.Vector3 get rHand => _getPos('rHand');
-}
-
-// ================= USER POSE DATA =================
-final StickmanSkeleton myPose = StickmanSkeleton()
-  ..headRadius = 6.9
-  ..strokeWidth = 5.4
-  ..hip.setValues(1.0, 0.0, 0.0)
-  ..neck.setValues(0.0, -14.7, 0.0)
-  ..head.setValues(0.0, -22.0, 0.0)
-  ..lKnee.setValues(-4.1, 11.8, 0.0)
-  ..rKnee.setValues(5.0, 12.0, 0.0)
-  ..lFoot.setValues(-7.2, 24.5, 0.0)
-  ..rFoot.setValues(7.9, 24.3, 0.0)
-  ..lElbow.setValues(-6.1, -7.2, 0.0)
-  ..rElbow.setValues(6.2, -7.4, 0.0)
-  ..lHand.setValues(-10.0, 0.0, 0.0)
-  ..rHand.setValues(10.0, 0.0, 0.0);
 
 // ================= GAME COMPONENTS =================
 
@@ -112,144 +20,6 @@ enum WeaponType { none, dagger, sword, axe, bow }
 
 extension WeaponTypeExtension on WeaponType {
   String get name => toString().split('.').last.toUpperCase();
-}
-
-class StickmanAnimator {
-  Color color;
-  final double scale;
-  WeaponType weaponType;
-  StickmanSkeleton skeleton;
-  final StickmanSkeleton _basePose;
-
-  double _facingDirection = 1.0;
-  double _runTime = 0.0;
-  double _attackTime = 0.0;
-  final double _attackDuration = 0.15; // Fast swing
-
-  // Cache for hitbox calculation
-  Offset lastWeaponTip = Offset.zero;
-
-  StickmanAnimator({
-    required this.color,
-    this.scale = 1.0,
-    this.weaponType = WeaponType.none,
-  }) : skeleton = myPose.clone(), _basePose = myPose.clone();
-
-  void triggerAttack() {
-    if (_attackTime <= 0) {
-      _attackTime = _attackDuration;
-    }
-  }
-
-  void update(double dt, Vector2 velocity) {
-    if (velocity.x.abs() > 0.1) _facingDirection = velocity.x.sign;
-
-    // Running Logic
-    if (velocity.length > 10) {
-      _runTime += dt * 10;
-      double legSwing = sin(_runTime) * 8;
-      double kneeLift = max(0, sin(_runTime)) * 5;
-
-      skeleton.lKnee.x = _basePose.lKnee.x + legSwing;
-      skeleton.lFoot.x = _basePose.lFoot.x + legSwing * 1.5;
-      skeleton.lFoot.y = _basePose.lFoot.y - kneeLift;
-
-      double rLegSwing = sin(_runTime + pi) * 8;
-      double rKneeLift = max(0, sin(_runTime + pi)) * 5;
-      skeleton.rKnee.x = _basePose.rKnee.x + rLegSwing;
-      skeleton.rFoot.x = _basePose.rFoot.x + rLegSwing * 1.5;
-      skeleton.rFoot.y = _basePose.rFoot.y - rKneeLift;
-
-      skeleton.lElbow.x = _basePose.lElbow.x - legSwing;
-      skeleton.lHand.x = _basePose.lHand.x - legSwing;
-
-      // Only animate right arm if NOT attacking
-      if (_attackTime <= 0) {
-        skeleton.rElbow.x = _basePose.rElbow.x + legSwing;
-        skeleton.rHand.x = _basePose.rHand.x + legSwing;
-      }
-    } else {
-       // Reset Logic
-       skeleton.lKnee.x = _basePose.lKnee.x; skeleton.lFoot.x = _basePose.lFoot.x; skeleton.lFoot.y = _basePose.lFoot.y;
-       skeleton.rKnee.x = _basePose.rKnee.x; skeleton.rFoot.x = _basePose.rFoot.x; skeleton.rFoot.y = _basePose.rFoot.y;
-       skeleton.lElbow.x = _basePose.lElbow.x; skeleton.lHand.x = _basePose.lHand.x;
-       if (_attackTime <= 0) {
-          skeleton.rElbow.x = _basePose.rElbow.x; skeleton.rHand.x = _basePose.rHand.x;
-       }
-    }
-
-    // --- CIRCULAR SWING ATTACK ---
-    if (_attackTime > 0) {
-       _attackTime -= dt;
-       double progress = 1.0 - (_attackTime / _attackDuration);
-
-       // Arc: Starts Up (-pi/2), ends Front (0) or slightly down (pi/4)
-       double startAngle = -pi * 0.8; // Almost fully up/back
-       double endAngle = pi * 0.2;    // Slightly down/forward
-       double currentAngle = startAngle + (endAngle - startAngle) * progress;
-
-       double armLength = 25.0; // Forearm length
-
-       // Elbow stays roughly at shoulder, maybe moves slightly
-       // We pivot around the Neck/Shoulder area
-       // Calculate Hand Position based on angle
-       double cx = _basePose.neck.x;
-       double cy = _basePose.neck.y;
-
-       // Elbow is half-way along the arc
-       skeleton.rElbow.x = cx + cos(currentAngle) * (armLength * 0.5);
-       skeleton.rElbow.y = cy + sin(currentAngle) * (armLength * 0.5);
-
-       // Hand is at the end
-       skeleton.rHand.x = cx + cos(currentAngle) * armLength;
-       skeleton.rHand.y = cy + sin(currentAngle) * armLength;
-    }
-  }
-
-  void render(Canvas canvas, Vector2 position, double height) {
-    canvas.save();
-    canvas.translate(position.x, position.y);
-    canvas.scale(scale * _facingDirection, scale);
-
-    final Paint paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = skeleton.strokeWidth
-      ..strokeCap = StrokeCap.round;
-
-    final Paint fillPaint = Paint()..color = color..style = PaintingStyle.fill;
-
-    Offset toScreen(v.Vector3 p) => Offset(p.x, p.y);
-
-    void drawNode(StickmanNode node, Offset parentPos) {
-      Offset currentPos = toScreen(node.position);
-      if (node.id != 'hip') canvas.drawLine(parentPos, currentPos, paint);
-      if (node.id == 'head') canvas.drawCircle(currentPos, skeleton.headRadius, fillPaint);
-      for (var child in node.children) drawNode(child, currentPos);
-    }
-    drawNode(skeleton.root, toScreen(skeleton.root.position));
-
-    // WEAPON DRAWING (Rotational)
-    if (weaponType != WeaponType.none) {
-      final rHandPos = toScreen(skeleton.rHand);
-      final rElbowPos = toScreen(skeleton.rElbow);
-
-      // Calculate angle from Elbow to Hand to determine sword direction
-      final armDir = (rHandPos - rElbowPos);
-      final angle = atan2(armDir.dy, armDir.dx);
-
-      final swordLen = 35.0;
-      final tipPos = rHandPos + Offset(cos(angle) * swordLen, sin(angle) * swordLen);
-
-      // Store tip for Hitbox calculations (converted to world space roughly later)
-      // Note: This 'lastWeaponTip' is in local space relative to the stickman center
-      lastWeaponTip = tipPos;
-
-      canvas.drawLine(rHandPos, tipPos, Paint()..color=Colors.white..strokeWidth=2);
-    }
-
-    canvas.restore();
-  }
 }
 
 class VanguardGame extends FlameGame with TapCallbacks {
@@ -362,7 +132,8 @@ class VanguardGame extends FlameGame with TapCallbacks {
 class Player extends PositionComponent with HasGameRef<VanguardGame> {
   final JoystickComponent joystick;
   final Vector2 floorBounds;
-  late StickmanAnimator animator;
+
+  StickmanAnimator? animator;
   late RectangleComponent bodyHitbox;
 
   // Health
@@ -372,14 +143,23 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
   List<WeaponType> inventory = [WeaponType.sword];
   WeaponType currentWeapon = WeaponType.sword;
 
+  double _facingDirection = 1.0;
+
   Player(this.joystick, {required this.floorBounds}) : super(size: Vector2(60, 90), anchor: Anchor.bottomCenter) {
     position = Vector2(100, 300);
-    animator = StickmanAnimator(color: Colors.green, weaponType: currentWeapon);
+  }
+
+  @override
+  Future<void> onLoad() async {
+    animator = await StickmanAnimator.load('assets/test.sap');
+    animator?.color = Colors.green;
+
+    bodyHitbox = RectangleComponent(size: size, paint: Paint()..color = Colors.transparent);
+    add(bodyHitbox);
   }
 
   void equipWeapon(WeaponType type) {
     currentWeapon = type;
-    animator.weaponType = type;
   }
 
   void collectLoot(WeaponType type) {
@@ -390,22 +170,13 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
   }
 
   void attack() {
-    animator.triggerAttack();
+    animator?.play('attack');
 
-    // HITBOX LOGIC: Precise Tip Calculation
-    // We need to convert the local tip position to world position
-    // Facing direction matters
-    double dir = animator._facingDirection;
-    Offset tipLocal = animator.lastWeaponTip;
-
-    // Convert local Offset (relative to anchor) to World Vector2
-    // Local tip X needs to be flipped if facing left
-    Vector2 tipWorld = position + Vector2(tipLocal.dx * dir, tipLocal.dy);
+    Vector2 tipWorld = position + Vector2(40 * _facingDirection, -45);
 
     for (final c in gameRef.world.children) {
       if (c is Enemy) {
-        // Check distance from Sword Tip to Enemy Center
-        if (tipWorld.distanceTo(c.position + Vector2(0, -45)) < 40) {
+        if (tipWorld.distanceTo(c.position + Vector2(0, -45)) < 50) {
            c.takeDamage(20);
         }
       }
@@ -414,23 +185,16 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
 
   void takeDamage(int amount) {
     currentHp -= amount;
-    animator.color = Colors.white;
-    Future.delayed(const Duration(milliseconds: 100), () => animator.color = Colors.green);
+    animator?.color = Colors.white;
+    Future.delayed(const Duration(milliseconds: 100), () => animator?.color = Colors.green);
     if (currentHp <= 0) {
-       // Game Over
        removeFromParent();
     }
   }
 
   @override
-  Future<void> onLoad() async {
-    bodyHitbox = RectangleComponent(size: size, paint: Paint()..color = Colors.transparent);
-    add(bodyHitbox);
-  }
-
-  @override
   void render(Canvas canvas) {
-    animator.render(canvas, Vector2(size.x/2, size.y), size.y);
+    animator?.render(canvas, Vector2(size.x/2, size.y), size.y);
     super.render(canvas);
   }
 
@@ -441,10 +205,22 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
     if (!joystick.delta.isZero()) {
       velocity = joystick.relativeDelta * 250;
       position.add(velocity * dt);
+
+      if (velocity.x.abs() > 0.1) _facingDirection = velocity.x.sign;
     }
+
     position.y = position.y.clamp(floorBounds.x, floorBounds.y);
     priority = position.y.toInt();
-    animator.update(dt, velocity);
+
+    if (animator != null) {
+        if (velocity.length > 10) {
+            animator!.play('run');
+        } else {
+            animator!.play('idle');
+        }
+
+        animator!.update(dt);
+    }
 
     for(final c in gameRef.world.children) {
       if (c is LootBox && c.toAbsoluteRect().overlaps(bodyHitbox.toAbsoluteRect())) c.pickup();
@@ -453,20 +229,25 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
 }
 
 class Enemy extends PositionComponent with HasGameRef<VanguardGame> {
-  late StickmanAnimator animator;
+  StickmanAnimator? animator;
   int health = 30;
   double _attackCooldown = 0.0;
+  double _facingDirection = 1.0;
 
-  Enemy({required Vector2 position}) : super(position: position, size: Vector2(60, 90), anchor: Anchor.bottomCenter) {
-    animator = StickmanAnimator(color: Colors.red, weaponType: WeaponType.none);
+  Enemy({required Vector2 position}) : super(position: position, size: Vector2(60, 90), anchor: Anchor.bottomCenter);
+
+  @override
+  Future<void> onLoad() async {
+      animator = await StickmanAnimator.load('assets/test.sap');
+      animator?.color = Colors.red;
   }
 
   void takeDamage(int amount) {
     health -= amount;
-    animator.color = Colors.white;
-    Future.delayed(const Duration(milliseconds: 100), () => animator.color = (this is Boss) ? Colors.purple : Colors.red);
+    animator?.color = Colors.white;
+    Future.delayed(const Duration(milliseconds: 100), () => animator?.color = (this is Boss) ? Colors.purple : Colors.red);
     if (health <= 0) {
-      if (Random().nextDouble() < 0.5) gameRef.world.add(LootBox(position: position)); // Increased Drop Rate
+      if (Random().nextDouble() < 0.5) gameRef.world.add(LootBox(position: position));
       removeFromParent();
       if (this is Boss) gameRef.onBossDefeated();
     }
@@ -474,7 +255,7 @@ class Enemy extends PositionComponent with HasGameRef<VanguardGame> {
 
   @override
   void render(Canvas canvas) {
-    animator.render(canvas, Vector2(size.x/2, size.y), size.y);
+    animator?.render(canvas, Vector2(size.x/2, size.y), size.y);
     super.render(canvas);
   }
 
@@ -482,32 +263,33 @@ class Enemy extends PositionComponent with HasGameRef<VanguardGame> {
   void update(double dt) {
     super.update(dt);
     final player = gameRef.player;
-    if (player.parent == null) return;
+    if (player.parent == null || animator == null) return;
 
     double dist = position.distanceTo(player.position);
 
     if (dist < 400 && dist > 50) {
       Vector2 dir = (player.position - position).normalized();
       position.add(dir * 80 * dt);
-      animator.update(dt, dir * 80);
+      if (dir.x.abs() > 0.1) _facingDirection = dir.x.sign;
+
+      animator!.play('run');
+      animator!.update(dt);
+
     } else if (dist <= 50) {
-      animator.update(dt, Vector2.zero());
+      animator!.play('idle');
+      animator!.update(dt);
+
       if (_attackCooldown <= 0) {
-        animator.triggerAttack(); // Swing animation
+        animator!.play('attack');
 
-        // HITBOX LOGIC for Enemy
-        double dir = animator._facingDirection;
-        Offset tipLocal = animator.lastWeaponTip;
-        Vector2 tipWorld = position + Vector2(tipLocal.dx * dir, tipLocal.dy);
-
-        // Check Tip vs Player Body
-        if (tipWorld.distanceTo(player.position + Vector2(0, -45)) < 30) {
+        if (player.position.distanceTo(position) < 50) {
           player.takeDamage(5);
         }
         _attackCooldown = 1.5;
       }
     } else {
-      animator.update(dt, Vector2.zero());
+      animator!.play('idle');
+      animator!.update(dt);
     }
 
     if (_attackCooldown > 0) _attackCooldown -= dt;
@@ -518,12 +300,15 @@ class Enemy extends PositionComponent with HasGameRef<VanguardGame> {
 class Boss extends Enemy {
   Boss({required super.position}) {
     health = 200;
-    animator = StickmanAnimator(color: Colors.purple, scale: 2.0, weaponType: WeaponType.axe);
     size = Vector2(120, 180);
   }
-}
 
-// ================= UI & COMPONENTS =================
+  @override
+  Future<void> onLoad() async {
+      await super.onLoad();
+      animator?.color = Colors.purple;
+  }
+}
 
 class InventoryDisplay extends PositionComponent with HasGameRef<VanguardGame> {
   final List<InventorySlot> slots = [];
