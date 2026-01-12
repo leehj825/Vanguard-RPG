@@ -11,6 +11,7 @@ export 'package:stickman_3d/stickman_3d.dart';
 class StickmanAnimator {
   final StickmanController _controller;
   Color color;
+  // Store clips with lowercase keys for case-insensitive lookup
   Map<String, StickmanClip> clips = {};
 
   StickmanAnimator._(this._controller, this.color);
@@ -22,27 +23,31 @@ class StickmanAnimator {
 
     try {
       final jsonString = await rootBundle.loadString(path);
-      // Attempt to parse the .sap file as a JSON map
       final dynamic json = jsonDecode(jsonString);
 
       if (json is Map<String, dynamic>) {
+        // FIXED: Handle 'clips' as both List (new format) and Map (legacy format)
         if (json.containsKey('clips')) {
-           final clipsMap = json['clips'] as Map<String, dynamic>;
-           for (var key in clipsMap.keys) {
-              animator.clips[key] = StickmanClip.fromJson(clipsMap[key]);
+           final dynamic clipsData = json['clips'];
+
+           if (clipsData is List) {
+             for (var clip in clipsData) {
+               if (clip is Map<String, dynamic> && clip.containsKey('name')) {
+                 // Store name as lowercase for easier lookup
+                 animator.clips[clip['name'].toString().toLowerCase()] = StickmanClip.fromJson(clip);
+               }
+             }
+           } else if (clipsData is Map<String, dynamic>) {
+              for (var key in clipsData.keys) {
+                 animator.clips[key.toLowerCase()] = StickmanClip.fromJson(clipsData[key]);
+              }
            }
         } else {
-           // Try parsing root keys as clip names
+           // Try parsing root keys as clip names (fallback)
            json.forEach((key, value) {
-              if (key == 'gridz') return; // Skip gridz loading
-              if (value is Map<String, dynamic>) {
-                 try {
-                   if (value.containsKey('keyframes')) {
-                      animator.clips[key] = StickmanClip.fromJson(value);
-                   }
-                 } catch (e) {
-                   // Not a clip
-                 }
+              if (key == 'gridz') return;
+              if (value is Map<String, dynamic> && value.containsKey('keyframes')) {
+                  animator.clips[key.toLowerCase()] = StickmanClip.fromJson(value);
               }
            });
         }
@@ -54,10 +59,8 @@ class StickmanAnimator {
     return animator;
   }
 
-  // Handle WeaponType mismatch by using string matching
   void setWeapon(String name) {
     try {
-      // Assuming Stickman3D package has a WeaponType enum
       final type = WeaponType.values.firstWhere(
         (e) => e.toString().split('.').last.toLowerCase() == name.toLowerCase(),
         orElse: () => WeaponType.none
@@ -68,31 +71,29 @@ class StickmanAnimator {
     }
   }
 
-  // Expose scale
   set scale(double value) => _controller.scale = value;
 
   void play(String name) {
-    if (clips.containsKey(name)) {
-      if (_controller.activeClip != clips[name]) {
-        _controller.activeClip = clips[name];
+    // Normalize name to lowercase
+    final key = name.toLowerCase();
+
+    if (clips.containsKey(key)) {
+      if (_controller.activeClip != clips[key]) {
+        _controller.activeClip = clips[key];
         _controller.isPlaying = true;
         _controller.setMode(EditorMode.animate);
       }
     } else {
-      // Fallback for procedural animations
-      if (name == 'run' || name == 'idle') {
+      // Fallback for procedural animations if clip is missing (e.g. 'idle')
+      if (key == 'run' || key == 'idle') {
         _controller.setMode(EditorMode.pose);
       }
     }
   }
 
-  void update(double dt) {
-    // Pass 0 velocity as main.dart doesn't provide it in the update(dt) signature.
-    // The controller uses velocity for procedural running.
-    // Since we are likely using clips or falling back to pose mode, this might result in static procedural poses
-    // if a clip isn't playing.
-    // Ideally main.dart should pass velocity, but we are adhering to the requested signature.
-    _controller.update(dt, 0, 0);
+  // FIXED: Added vx, vy parameters to support procedural animation calculation
+  void update(double dt, [double vx = 0, double vy = 0]) {
+    _controller.update(dt, vx, vy);
   }
 
   void render(Canvas canvas, Vector2 position, double height) {
@@ -109,9 +110,6 @@ class StickmanAnimator {
 
     canvas.save();
     canvas.translate(position.x, position.y);
-    // Draw centered or at feet?
-    // Game logic seems to expect bottomCenter. StickmanPainter draws relative to hip usually.
-    // We might need to adjust Y.
     painter.paint(canvas, Size(100, height));
     canvas.restore();
   }

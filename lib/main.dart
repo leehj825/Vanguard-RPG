@@ -172,7 +172,8 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
   }
 
   void attack() {
-    animator?.play('attack');
+    // FIXED: Use 'Kick' because 'attack' does not exist in test.sap
+    animator?.play('Kick');
 
     Vector2 tipWorld = position + Vector2(40 * _facingDirection, -45);
 
@@ -217,11 +218,13 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
 
     if (animator != null) {
         if (velocity.length > 10) {
-            animator!.play('run');
+            animator!.play('run'); // This now finds 'Run' due to case-insensitive fix
         } else {
-            animator!.play('idle');
+            animator!.play('idle'); // Will fallback to procedural pose since 'idle' is missing
         }
-        animator!.update(dt);
+
+        // FIXED: Pass velocity to allow procedural animation fallbacks
+        animator!.update(dt, velocity.x, velocity.y);
     }
 
     for(final c in gameRef.world.children) {
