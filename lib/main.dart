@@ -8,7 +8,9 @@ import 'package:flame/effects.dart';
 import 'package:flutter/material.dart';
 import 'dart:math';
 import 'package:vector_math/vector_math_64.dart' as v;
-import 'package:stickman_animator/stickman_animator.dart';
+
+// CHANGED: Package name updated to stickman_3d
+import 'package:stickman_3d/stickman_animator.dart';
 
 void main() {
   runApp(const GameWidget.controlled(gameFactory: VanguardGame.new));
@@ -136,7 +138,6 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
   StickmanAnimator? animator;
   late RectangleComponent bodyHitbox;
 
-  // Health
   double maxHp = 100;
   double currentHp = 100;
 
@@ -151,9 +152,10 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
 
   @override
   Future<void> onLoad() async {
+    // CHANGED: Ensure the load method matches the library's API
     animator = await StickmanAnimator.load('assets/test.sap');
-    animator?.color = Colors.green;
 
+    animator?.color = Colors.green;
     bodyHitbox = RectangleComponent(size: size, paint: Paint()..color = Colors.transparent);
     add(bodyHitbox);
   }
@@ -218,7 +220,6 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
         } else {
             animator!.play('idle');
         }
-
         animator!.update(dt);
     }
 
@@ -281,7 +282,6 @@ class Enemy extends PositionComponent with HasGameRef<VanguardGame> {
 
       if (_attackCooldown <= 0) {
         animator!.play('attack');
-
         if (player.position.distanceTo(position) < 50) {
           player.takeDamage(5);
         }
@@ -310,6 +310,7 @@ class Boss extends Enemy {
   }
 }
 
+// ... [InventoryDisplay, InventorySlot, BossWarningText, etc. remains unchanged] ...
 class InventoryDisplay extends PositionComponent with HasGameRef<VanguardGame> {
   final List<InventorySlot> slots = [];
 
