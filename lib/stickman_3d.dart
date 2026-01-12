@@ -26,7 +26,6 @@ class StickmanAnimator {
       final dynamic json = jsonDecode(jsonString);
 
       if (json is Map<String, dynamic>) {
-        // FIXED: Handle 'clips' as both List (new format) and Map (legacy format)
         if (json.containsKey('clips')) {
            final dynamic clipsData = json['clips'];
 
@@ -91,12 +90,11 @@ class StickmanAnimator {
     }
   }
 
-  // FIXED: Added vx, vy parameters to support procedural animation calculation
   void update(double dt, [double vx = 0, double vy = 0]) {
     _controller.update(dt, vx, vy);
   }
 
-  void render(Canvas canvas, Vector2 position, double height) {
+  void render(Canvas canvas, Vector2 position, double height, double facingDirection) {
     final painter = StickmanPainter(
       controller: _controller,
       color: color,
@@ -106,10 +104,12 @@ class StickmanAnimator {
       cameraHeightOffset: 0,
       viewRotationX: 0,
       viewRotationY: 0,
+      showGrid: false, // Disable grid
     );
 
     canvas.save();
     canvas.translate(position.x, position.y);
+    canvas.scale(-facingDirection, 1.0);
     painter.paint(canvas, Size(100, height));
     canvas.restore();
   }
