@@ -34,6 +34,7 @@ class StickmanAnimator {
         } else {
            // Try parsing root keys as clip names
            json.forEach((key, value) {
+              if (key == 'gridz') return; // Skip gridz loading
               if (value is Map<String, dynamic>) {
                  try {
                    if (value.containsKey('keyframes')) {
