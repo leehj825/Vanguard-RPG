@@ -104,7 +104,6 @@ class StickmanAnimator {
       cameraHeightOffset: 0,
       viewRotationX: 0,
       viewRotationY: 0,
-      showGrid: false, // Disable grid
     );
 
     canvas.save();
