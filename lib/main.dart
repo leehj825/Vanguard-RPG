@@ -9,8 +9,7 @@ import 'package:flutter/material.dart';
 import 'dart:math';
 import 'package:vector_math/vector_math_64.dart' as v;
 
-// CHANGED: Package name updated to stickman_3d
-import 'package:stickman_3d/stickman_3d.dart';
+import 'package:vanguard_path/stickman_3d.dart';
 
 void main() {
   runApp(const GameWidget.controlled(gameFactory: VanguardGame.new));
