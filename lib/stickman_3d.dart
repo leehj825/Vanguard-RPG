@@ -1,8 +1,12 @@
 import 'dart:ui';
 import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/services.dart';
-import 'package:vector_math/vector_math_64.dart';
+import 'package:flutter/material.dart' show Colors, Paint, PaintingStyle, StrokeCap, Size, Offset, CustomPainter, Color;
+import 'package:vector_math/vector_math_64.dart' as v;
 import 'package:stickman_3d/stickman_3d.dart';
+// Needed to access StickmanNode/StickmanSkeleton if they are exported.
+// The package exports them.
 
 // Re-export the package so things like WeaponType are available
 export 'package:stickman_3d/stickman_3d.dart';
@@ -94,8 +98,9 @@ class StickmanAnimator {
     _controller.update(dt, vx, vy);
   }
 
-  void render(Canvas canvas, Vector2 position, double height, double facingDirection) {
-    final painter = StickmanPainter(
+  void render(Canvas canvas, v.Vector2 position, double height, double facingDirection) {
+    // USE CUSTOM PAINTER TO DISABLE GRID
+    final painter = _NoGridStickmanPainter(
       controller: _controller,
       color: color,
       cameraView: CameraView.side,
@@ -111,5 +116,123 @@ class StickmanAnimator {
     canvas.scale(-facingDirection, 1.0);
     painter.paint(canvas, Size(100, height));
     canvas.restore();
+  }
+}
+
+// Custom Painter that duplicates logic but omits grid
+class _NoGridStickmanPainter extends CustomPainter {
+  final StickmanController controller;
+  final Color color;
+  final CameraView cameraView;
+  final double viewRotationX;
+  final double viewRotationY;
+  final double viewZoom;
+  final Offset viewPan;
+  final double cameraHeightOffset;
+
+  _NoGridStickmanPainter({
+    required this.controller,
+    this.color = Colors.white,
+    this.cameraView = CameraView.free,
+    this.viewRotationX = 0.0,
+    this.viewRotationY = 0.0,
+    this.viewZoom = 1.0,
+    this.viewPan = Offset.zero,
+    this.cameraHeightOffset = 0.0,
+  });
+
+  static Offset project(
+      v.Vector3 point,
+      Size size,
+      CameraView view,
+      double rotX,
+      double rotY,
+      double zoom,
+      Offset pan,
+      double heightOffset)
+  {
+    double x = 0;
+    double y = 0;
+
+    switch (view) {
+      case CameraView.front:
+        x = point.x;
+        y = point.y;
+        break;
+      case CameraView.side:
+        x = point.z;
+        y = point.y;
+        break;
+      case CameraView.top:
+        x = point.x;
+        y = point.z;
+        break;
+      case CameraView.free:
+        double x1 = point.x * cos(rotY) - point.z * sin(rotY);
+        double z1 = point.x * sin(rotY) + point.z * cos(rotY);
+        double y1 = point.y;
+        double y2 = y1 * cos(rotX) - z1 * sin(rotX);
+        double z2 = y1 * sin(rotX) + z1 * cos(rotX);
+        double x2 = x1;
+        x = x2;
+        y = y2;
+        break;
+    }
+
+    double sx = x * zoom;
+    double sy = y * zoom;
+    sy += heightOffset;
+    double cx = size.width / 2;
+    double cy = size.height / 2;
+    return Offset(cx + pan.dx + sx, cy + pan.dy + sy);
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final skel = controller.skeleton;
+    final strokeWidth = skel.strokeWidth * viewZoom * controller.scale;
+    final headRadius = skel.headRadius * viewZoom * controller.scale;
+
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..strokeCap = StrokeCap.round;
+
+    final fillPaint = Paint()..color = color ..style = PaintingStyle.fill;
+
+    // SKIP DRAW GRID
+
+    Offset toScreen(v.Vector3 vec) => project(
+      vec * controller.scale,
+      size,
+      cameraView,
+      viewRotationX,
+      viewRotationY,
+      viewZoom,
+      viewPan,
+      cameraHeightOffset
+    );
+
+    void drawNode(StickmanNode node) {
+      final start = toScreen(node.position);
+
+      if (node.id == 'head') {
+        canvas.drawCircle(start, headRadius, fillPaint);
+      }
+
+      for (var child in node.children) {
+         final end = toScreen(child.position);
+         canvas.drawLine(start, end, paint);
+         drawNode(child);
+      }
+    }
+
+    drawNode(skel.root);
+  }
+
+  @override
+  bool shouldRepaint(covariant _NoGridStickmanPainter oldDelegate) {
+    return true;
   }
 }

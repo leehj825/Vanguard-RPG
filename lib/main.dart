@@ -29,6 +29,7 @@ class VanguardGame extends FlameGame with TapCallbacks {
   late InventoryDisplay inventoryDisplay;
   late BossWarningText bossWarning;
   late BossHealthBar bossHealthBar;
+  late HudButtonComponent kickButton;
 
   double distanceTraveled = 0;
   double nextBossDistance = 1000;
@@ -58,13 +59,29 @@ class VanguardGame extends FlameGame with TapCallbacks {
     camera.viewport.add(inventoryDisplay);
     camera.viewport.add(bossWarning);
     camera.viewport.add(bossHealthBar);
+
+    kickButton = HudButtonComponent(
+      button: CircleComponent(radius: 30, paint: BasicPalette.red.withAlpha(200).paint()),
+      buttonDown: CircleComponent(radius: 30, paint: BasicPalette.white.withAlpha(200).paint()),
+      onPressed: () => player.attack(),
+      anchor: Anchor.center,
+    );
+    camera.viewport.add(kickButton);
   }
 
   @override
   void onTapDown(TapDownEvent event) {
     super.onTapDown(event);
-    if (!joystick.containsPoint(event.localPosition) && !inventoryDisplay.containsPoint(event.localPosition)) {
-      player.attack();
+    // Removed direct tap attack to rely on button, or keep it as backup?
+    // Keeping it as backup if not clicking HUD, but now we have a button.
+    if (!joystick.containsPoint(event.localPosition) && !inventoryDisplay.containsPoint(event.localPosition) && !kickButton.containsPoint(event.localPosition)) {
+      // player.attack(); // Disable tap-to-attack to prioritize button usage? Or keep?
+      // User said "I do not see kick button", implies they want a button.
+      // I'll keep tap-to-attack disabled to avoid confusion or accidental taps,
+      // or keep it for convenience. Let's keep it but check button bounds.
+      // Actually, HudButton consumes the event if pressed.
+
+      // Let's rely on the button as requested.
     }
   }
 
@@ -79,6 +96,7 @@ class VanguardGame extends FlameGame with TapCallbacks {
       inventoryDisplay.position = Vector2(size.x / 2 - 175, 20);
       bossWarning.position = size / 2;
       bossHealthBar.position = Vector2(size.x / 2 - 200, 80);
+      kickButton.position = Vector2(size.x - 60, size.y - 60);
     }
   }
 
@@ -145,7 +163,7 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
 
   double _facingDirection = 1.0;
 
-  Player(this.joystick, {required this.floorBounds}) : super(size: Vector2(60, 90), anchor: Anchor.bottomCenter) {
+  Player(this.joystick, {required this.floorBounds}) : super(size: Vector2(100, 150), anchor: Anchor.bottomCenter) {
     position = Vector2(100, 300);
   }
 
@@ -239,7 +257,7 @@ class Enemy extends PositionComponent with HasGameRef<VanguardGame> {
   double _attackCooldown = 0.0;
   double _facingDirection = 1.0;
 
-  Enemy({required Vector2 position}) : super(position: position, size: Vector2(60, 90), anchor: Anchor.bottomCenter);
+  Enemy({required Vector2 position}) : super(position: position, size: Vector2(100, 150), anchor: Anchor.bottomCenter);
 
   @override
   Future<void> onLoad() async {
@@ -310,7 +328,7 @@ class Enemy extends PositionComponent with HasGameRef<VanguardGame> {
 class Boss extends Enemy {
   Boss({required super.position}) {
     health = 200;
-    size = Vector2(120, 180);
+    size = Vector2(200, 300);
   }
 
   @override
