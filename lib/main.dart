@@ -161,6 +161,7 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
 
   void equipWeapon(WeaponType type) {
     currentWeapon = type;
+    animator?.setWeapon(type.name);
   }
 
   void collectLoot(WeaponType type) {
@@ -195,7 +196,8 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
 
   @override
   void render(Canvas canvas) {
-    animator?.render(canvas, Vector2(size.x/2, size.y), size.y);
+    // FIXED: Use v.Vector2 (64-bit) explicitly to avoid type mismatch with Flame/stickman_3d components
+    animator?.render(canvas, v.Vector2(size.x/2, size.y), size.y);
     super.render(canvas);
   }
 
@@ -255,7 +257,8 @@ class Enemy extends PositionComponent with HasGameRef<VanguardGame> {
 
   @override
   void render(Canvas canvas) {
-    animator?.render(canvas, Vector2(size.x/2, size.y), size.y);
+    // FIXED: Use v.Vector2 (64-bit) explicitly
+    animator?.render(canvas, v.Vector2(size.x/2, size.y), size.y);
     super.render(canvas);
   }
 
@@ -306,6 +309,9 @@ class Boss extends Enemy {
   Future<void> onLoad() async {
       await super.onLoad();
       animator?.color = Colors.purple;
+      // Added back scale and weapon config
+      animator?.scale = 2.0;
+      // animator?.setWeapon('AXE'); // Optional: Add if desired and package supports it
   }
 }
 

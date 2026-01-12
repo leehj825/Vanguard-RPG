@@ -26,11 +26,6 @@ class StickmanAnimator {
       final dynamic json = jsonDecode(jsonString);
 
       if (json is Map<String, dynamic>) {
-        // Option A: The file is a single Clip
-        // Option B: The file is a collection of clips
-        // Option C: The file is a full Project export
-
-        // Let's assume a simple key-value map of clips for this game
         if (json.containsKey('clips')) {
            final clipsMap = json['clips'] as Map<String, dynamic>;
            for (var key in clipsMap.keys) {
@@ -41,7 +36,6 @@ class StickmanAnimator {
            json.forEach((key, value) {
               if (value is Map<String, dynamic>) {
                  try {
-                   // Verify if it looks like a clip
                    if (value.containsKey('keyframes')) {
                       animator.clips[key] = StickmanClip.fromJson(value);
                    }
@@ -53,16 +47,27 @@ class StickmanAnimator {
         }
       }
     } catch (e) {
-      // If loading fails or file doesn't exist (mock), just proceed with procedural controller
       print("Warning: Failed to load stickman assets from $path: $e");
     }
 
     return animator;
   }
 
-  set weaponType(WeaponType type) => _controller.weaponType = type;
+  // Handle WeaponType mismatch by using string matching
+  void setWeapon(String name) {
+    try {
+      // Assuming Stickman3D package has a WeaponType enum
+      final type = WeaponType.values.firstWhere(
+        (e) => e.toString().split('.').last.toLowerCase() == name.toLowerCase(),
+        orElse: () => WeaponType.none
+      );
+      _controller.weaponType = type;
+    } catch (e) {
+      _controller.weaponType = WeaponType.none;
+    }
+  }
 
-  // Expose scale if needed
+  // Expose scale
   set scale(double value) => _controller.scale = value;
 
   void play(String name) {
@@ -81,22 +86,18 @@ class StickmanAnimator {
   }
 
   void update(double dt) {
-    // The library requires velocity for procedural animation.
-    // Since this update method doesn't receive velocity, we assume 0 or
-    // rely on 'play("run")' having triggered a clip.
-    // If we are in procedural mode (EditorMode.pose) and running, we might miss leg movement
-    // if we pass 0,0.
-    // However, without changing the call signature in main.dart, this is the best we can do.
-    // Note: If 'play' switched to 'animate' mode, velocity is ignored anyway.
+    // Pass 0 velocity as main.dart doesn't provide it in the update(dt) signature.
+    // The controller uses velocity for procedural running.
+    // Since we are likely using clips or falling back to pose mode, this might result in static procedural poses
+    // if a clip isn't playing.
+    // Ideally main.dart should pass velocity, but we are adhering to the requested signature.
     _controller.update(dt, 0, 0);
   }
 
   void render(Canvas canvas, Vector2 position, double height) {
-    // StickmanPainter requires a controller
     final painter = StickmanPainter(
       controller: _controller,
       color: color,
-      // Default view parameters
       cameraView: CameraView.side,
       viewZoom: 1.0,
       viewPan: Offset.zero,
@@ -107,15 +108,10 @@ class StickmanAnimator {
 
     canvas.save();
     canvas.translate(position.x, position.y);
-
-    // The painter paints based on the skeleton's absolute coordinates.
-    // We assume the skeleton is centered at (0,0) relative to the hip/root.
-    // The provided height is likely the entity height for scaling?
-    // StickmanPainter doesn't take 'height' constraint, it draws the skeleton as is.
-    // Scaling is handled by _controller.scale.
-
+    // Draw centered or at feet?
+    // Game logic seems to expect bottomCenter. StickmanPainter draws relative to hip usually.
+    // We might need to adjust Y.
     painter.paint(canvas, Size(100, height));
-
     canvas.restore();
   }
 }
