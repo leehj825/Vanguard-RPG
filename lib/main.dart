@@ -235,6 +235,7 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
     priority = position.y.toInt();
 
     if (animator != null) {
+      if (!animator!.isPlaying('Kick')) {
         if (velocity.length > 10) {
             animator!.play('Run'); // This now finds 'Run' due to case-insensitive fix
         } else {
@@ -243,6 +244,10 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
 
         // FIXED: Pass velocity to allow procedural animation fallbacks
         animator!.update(dt, velocity.x, velocity.y);
+      } else {
+        // While kicking, update without velocity to keep it in place (or pass velocity if you want sliding kick)
+        animator!.update(dt, 0, 0);
+      }
     }
 
     for(final c in gameRef.world.children) {
@@ -293,6 +298,11 @@ class Enemy extends PositionComponent with HasGameRef<VanguardGame> {
     double vx = 0;
     double vy = 0;
 
+    if (animator != null && animator!.isPlaying('Kick')) {
+       animator!.update(dt, 0, 0);
+       return;
+    }
+
     if (dist < 400 && dist > 50) {
       Vector2 dir = (player.position - position).normalized();
       position.add(dir * 80 * dt);
@@ -305,16 +315,16 @@ class Enemy extends PositionComponent with HasGameRef<VanguardGame> {
       animator!.update(dt, vx, vy);
 
     } else if (dist <= 50) {
-      animator!.play('idle');
-      animator!.update(dt, 0, 0);
-
       if (_attackCooldown <= 0) {
         animator!.play('Kick'); // Use Kick
         if (player.position.distanceTo(position) < 50) {
           player.takeDamage(5);
         }
         _attackCooldown = 1.5;
+      } else {
+        animator!.play('idle');
       }
+      animator!.update(dt, 0, 0);
     } else {
       animator!.play('idle');
       animator!.update(dt, 0, 0);

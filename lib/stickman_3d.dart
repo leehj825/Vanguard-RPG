@@ -94,6 +94,15 @@ class StickmanAnimator {
     }
   }
 
+  bool isPlaying(String name) {
+    final key = name.toLowerCase();
+    // Check if clip exists and is active.
+    // Note: StickmanController logic might not auto-clear activeClip when done if looping is false,
+    // but typically isPlaying becomes false?
+    // We assume isPlaying is true only while animating.
+    return clips.containsKey(key) && _controller.activeClip == clips[key] && _controller.isPlaying;
+  }
+
   void update(double dt, [double vx = 0, double vy = 0]) {
     _controller.update(dt, vx, vy);
   }
@@ -114,7 +123,8 @@ class StickmanAnimator {
     canvas.save();
     canvas.translate(position.x, position.y);
     canvas.scale(facingDirection, 1.0);
-    painter.paint(canvas, Size(100, height));
+    // Use Width 0 to ensure centering at the translated position for correct flipping
+    painter.paint(canvas, Size(0, height));
     canvas.restore();
   }
 }
