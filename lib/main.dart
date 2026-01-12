@@ -163,7 +163,7 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
 
   double _facingDirection = 1.0;
 
-  Player(this.joystick, {required this.floorBounds}) : super(size: Vector2(100, 150), anchor: Anchor.bottomCenter) {
+  Player(this.joystick, {required this.floorBounds}) : super(size: Vector2(150, 225), anchor: Anchor.bottomCenter) {
     position = Vector2(100, 300);
   }
 
@@ -236,7 +236,7 @@ class Player extends PositionComponent with HasGameRef<VanguardGame> {
 
     if (animator != null) {
         if (velocity.length > 10) {
-            animator!.play('run'); // This now finds 'Run' due to case-insensitive fix
+            animator!.play('Run'); // This now finds 'Run' due to case-insensitive fix
         } else {
             animator!.play('idle'); // Will fallback to procedural pose since 'idle' is missing
         }
@@ -257,7 +257,7 @@ class Enemy extends PositionComponent with HasGameRef<VanguardGame> {
   double _attackCooldown = 0.0;
   double _facingDirection = 1.0;
 
-  Enemy({required Vector2 position}) : super(position: position, size: Vector2(100, 150), anchor: Anchor.bottomCenter);
+  Enemy({required Vector2 position}) : super(position: position, size: Vector2(150, 225), anchor: Anchor.bottomCenter);
 
   @override
   Future<void> onLoad() async {
@@ -301,7 +301,7 @@ class Enemy extends PositionComponent with HasGameRef<VanguardGame> {
       vx = dir.x * 80;
       vy = dir.y * 80;
 
-      animator!.play('run');
+      animator!.play('Run');
       animator!.update(dt, vx, vy);
 
     } else if (dist <= 50) {
@@ -328,7 +328,7 @@ class Enemy extends PositionComponent with HasGameRef<VanguardGame> {
 class Boss extends Enemy {
   Boss({required super.position}) {
     health = 200;
-    size = Vector2(200, 300);
+    size = Vector2(300, 450);
   }
 
   @override

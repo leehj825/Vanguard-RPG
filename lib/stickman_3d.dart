@@ -113,7 +113,7 @@ class StickmanAnimator {
 
     canvas.save();
     canvas.translate(position.x, position.y);
-    canvas.scale(-facingDirection, 1.0);
+    canvas.scale(facingDirection, 1.0);
     painter.paint(canvas, Size(100, height));
     canvas.restore();
   }
